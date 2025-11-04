@@ -1247,7 +1247,7 @@ impl AppEndpoint {
                 client_shared_chunk_group.assets.owned().await?,
             )
         } else {
-            (AvailabilityInfo::Root, vec![])
+            (AvailabilityInfo::root(), vec![])
         };
 
         let global_information = get_global_information_for_endpoint(
@@ -1709,7 +1709,7 @@ impl AppEndpoint {
                             .collect(),
                     ),
                     module_graph,
-                    AvailabilityInfo::Root,
+                    AvailabilityInfo::root(),
                 );
 
                 let chunk_group2_assets = chunking_context.evaluated_chunk_group_assets(
@@ -1751,7 +1751,7 @@ impl AppEndpoint {
                                 // TODO this should be ChunkGroup::Shared
                                 ChunkGroup::Entry(server_utils),
                                 module_graph,
-                                AvailabilityInfo::Root,
+                                AvailabilityInfo::root(),
                             )
                             .to_resolved()
                             .await?;
