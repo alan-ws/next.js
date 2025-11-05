@@ -103,6 +103,21 @@ impl ModuleResolveResultItem {
     }
 }
 
+#[turbo_tasks::value(shared)]
+#[derive(Debug, Clone, Default, Hash)]
+pub enum ImportUsage {
+    #[default]
+    Global,
+    Exports(Vec<RcStr>),
+}
+#[turbo_tasks::value_impl]
+impl ImportUsage {
+    #[turbo_tasks::function]
+    pub fn global() -> Vc<Self> {
+        Self::Global.cell()
+    }
+}
+
 #[turbo_tasks::value]
 #[derive(Debug, Clone, Default, Hash)]
 pub enum ExportUsage {
