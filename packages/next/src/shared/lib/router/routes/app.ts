@@ -115,6 +115,9 @@ export type NormalizedAppRoute = Omit<AppRoute, 'normalized' | 'segments'> & {
 }
 
 export function isNormalizedAppRoute(
+  route: InterceptionAppRoute
+): route is NormalizedInterceptionAppRoute
+export function isNormalizedAppRoute(
   route: AppRoute
 ): route is NormalizedAppRoute {
   return route.normalized
