@@ -18,6 +18,7 @@ use crate::{
         module_batches::BatchingConfig,
     },
     output::{OutputAsset, OutputAssets, OutputAssetsWithReferenced},
+    reference::ModuleReference,
 };
 
 #[derive(
@@ -316,6 +317,12 @@ pub trait ChunkingContext {
         self: Vc<Self>,
         module: Vc<Box<dyn Module>>,
     ) -> Result<Vc<ModuleExportUsage>>;
+
+    #[turbo_tasks::function]
+    async fn is_reference_unused(
+        self: Vc<Self>,
+        reference: Vc<Box<dyn ModuleReference>>,
+    ) -> Result<Vc<bool>>;
 
     /// Returns whether debug IDs are enabled for this chunking context.
     #[turbo_tasks::function]
