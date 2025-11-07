@@ -27,6 +27,7 @@ import type { NextTelemetryOptions } from '../cli/next-telemetry.js'
 import type { NextStartOptions } from '../cli/next-start.js'
 import type { NextInfoOptions } from '../cli/next-info.js'
 import type { NextDevOptions } from '../cli/next-dev.js'
+import type { NextAnalyzeOptions } from '../cli/next-analyze.js'
 import type { NextBuildOptions } from '../cli/next-build.js'
 import type { NextTypegenOptions } from '../cli/next-typegen.js'
 
@@ -197,6 +198,34 @@ program
     )
   })
   .usage('[directory] [options]')
+
+program
+  .command('experimental-analyze')
+  .description(
+    'Analyze bundle output. Does not produce build artifacts. Only compatible with Turbopack.'
+  )
+  .argument(
+    '[directory]',
+    `A directory on which to analyze the application. ${italic(
+      'If no directory is provided, the current directory will be used.'
+    )}`
+  )
+  .option('--no-mangling', 'Disables mangling.')
+  .option('--profile', 'Enables production profiling for React.')
+  .option('--serve', 'Serve the bundle analyzer in a browser after analysis.')
+  .addOption(
+    new Option(
+      '--port <port>',
+      'Specify a port number to serve the analyzer on.'
+    )
+      .implies({ serve: true })
+      .default(process.env.PORT ? parseInt(process.env.PORT, 10) : 4000)
+  )
+  .action((directory: string, options: NextAnalyzeOptions) => {
+    return import('../cli/next-analyze.js').then((mod) =>
+      mod.nextAnalyze(options, directory)
+    )
+  })
 
 program
   .command('dev', { isDefault: true })

@@ -907,5 +907,6 @@
   "906": "Bindings not loaded yet, but they are being loaded, did you forget to await?",
   "907": "bindings not loaded yet.  Either call `loadBindings` to wait for them to be available or ensure that `installBindings` has already been called.",
   "908": "Invalid flags should be run as node detached-flush dev ./path-to/project [eventsFile]",
-  "909": "Failed to load SWC binary for %s/%s, see more info here: https://nextjs.org/docs/messages/failed-loading-swc"
+  "909": "Failed to load SWC binary for %s/%s, see more info here: https://nextjs.org/docs/messages/failed-loading-swc",
+  "910": "Unable to get server address"
 }
