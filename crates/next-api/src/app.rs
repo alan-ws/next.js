@@ -1815,7 +1815,7 @@ impl AppEndpoint {
                             .await?;
                     }
 
-                    let current_referenced_assets = current_chunk_group.referenced_assets();
+                    let current_references = current_chunk_group.references();
                     let chunk_group = current_chunk_group.await?;
                     let current_availability_info = chunk_group.availability_info;
                     let current_chunks = chunk_group.assets;
@@ -1832,13 +1832,12 @@ impl AppEndpoint {
                                         evaluatable_assets,
                                         module_graph,
                                         *current_chunks,
-                                        current_referenced_assets,
+                                        current_references,
                                         current_availability_info,
                                     )
                                     .to_resolved()
                                     .await?,
                             ]),
-                            referenced_assets: ResolvedVc::cell(vec![]),
                             references: ResolvedVc::cell(vec![]),
                         }
                         .cell(),
