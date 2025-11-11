@@ -1,4 +1,5 @@
 import { InvariantError } from '../../shared/lib/invariant-error'
+import { runPendingImmediatesAfterCurrentTask } from './fast-set-immediate.external'
 
 /**
  * This is a utility function to make scheduling sequential tasks that run back to back easier.
@@ -16,6 +17,7 @@ export function scheduleInSequentialTasks<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: R | Promise<R>
       setTimeout(() => {
+        runPendingImmediatesAfterCurrentTask()
         try {
           pendingResult = render()
         } catch (err) {
@@ -48,6 +50,7 @@ export function pipelineInSequentialTasks<A, B, C>(
     return new Promise((resolve, reject) => {
       let oneResult: A | undefined = undefined
       setTimeout(() => {
+        runPendingImmediatesAfterCurrentTask()
         try {
           oneResult = one()
         } catch (err) {
@@ -59,6 +62,7 @@ export function pipelineInSequentialTasks<A, B, C>(
 
       let twoResult: B | undefined = undefined
       const twoId = setTimeout(() => {
+        runPendingImmediatesAfterCurrentTask()
         // if `one` threw, then this timeout would've been cleared,
         // so if we got here, we're guaranteed to have a value.
         try {
