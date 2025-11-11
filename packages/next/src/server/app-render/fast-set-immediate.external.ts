@@ -23,91 +23,57 @@ export function install() {
 
 export function runPendingImmediatesAfterCurrentTask() {
   startCapturingImmediates()
+  scheduleWorkAfterTicksAndMicrotasks()
+}
 
-  const scheduleWorkAfterTicksAndMicrotasks = () => {
-    originalNextTick(() => {
-      queueMicrotask(() => {
-        originalNextTick(() => {
-          if (pendingNextTicks > 0) {
-            // We have raw nextTicks. Let those run first.
-            debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
-            return scheduleWorkAfterTicksAndMicrotasks()
-          }
+function scheduleWorkAfterTicksAndMicrotasks() {
+  originalNextTick(() => {
+    queueMicrotask(() => {
+      originalNextTick(() => {
+        if (pendingNextTicks > 0) {
+          // We have raw nextTicks. Let those run first.
+          debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
+          return scheduleWorkAfterTicksAndMicrotasks()
+        }
 
-          return performWork()
-        })
+        return performWork()
       })
     })
-  }
+  })
+}
 
-  const performWork = () => {
-    debug?.(`scheduler :: performing work`)
+function performWork() {
+  debug?.(`scheduler :: performing work`)
 
-    // Find the first (if any) queued immediate that wasn't cleared
-    let queueItem: ActiveQueueItem | null = null
-    while (queuedImmediates.length) {
-      const maybeQueItem = queuedImmediates.shift()!
-      if (!maybeQueItem.isCleared) {
-        queueItem = maybeQueItem
-        break
-      }
+  // Find the first (if any) queued immediate that wasn't cleared
+  let queueItem: ActiveQueueItem | null = null
+  while (queuedImmediates.length) {
+    const maybeQueItem = queuedImmediates.shift()!
+    if (!maybeQueItem.isCleared) {
+      queueItem = maybeQueItem
+      break
     }
-    if (!queueItem) {
-      debug?.(`scheduler :: no immediates queued, exiting`)
-      stopCapturingImmediates()
-      return
-    }
-
-    const { immediateObject, callback, args } = queueItem
-
-    // note that this is not a real Immediate object, because we're running them in a nextTick
-    // TODO: we're already in our own tick, do we need another one?
-    const handle = args
-      ? scheduleImmediateInNextTickAndContinueLoop(callback, ...args)
-      : scheduleImmediateInNextTickAndContinueLoop(callback)
-
-    // Now that we're no longer buffering the immediate,
-    // make the BufferedImmediate proxy calls to the native object instead
-    immediateObject[INTERNALS].queueItem = null
-    immediateObject[INTERNALS].nativeImmediate = handle
-    clearQueueItem(queueItem)
+  }
+  if (!queueItem) {
+    debug?.(`scheduler :: no immediates queued, exiting`)
+    stopCapturingImmediates()
+    return
   }
 
-  const scheduleImmediateInNextTickAndContinueLoop = (
-    callback: (...args: any[]) => any,
-    ...args: any[]
-  ) => {
-    let isCleared = false
+  const { immediateObject, callback, args } = queueItem
 
-    originalNextTick(() => {
-      // schedule the loop again in case there's more immediates after this.
-      scheduleWorkAfterTicksAndMicrotasks()
+  immediateObject[INTERNALS].queueItem = null
+  clearQueueItem(queueItem)
 
-      if (isCleared) return
-      callback.apply(null, args)
-    })
-
-    const handle = {
-      ref() {
-        return this
-      },
-      unref() {
-        return this
-      },
-      hasRef() {
-        return true
-      },
-      _onImmediate() {},
-
-      [Symbol.dispose]() {
-        isCleared = true
-      },
-    } satisfies NodeJS.Immediate
-
-    return handle
-  }
-
+  // schedule the loop again in case there's more immediates after this.
   scheduleWorkAfterTicksAndMicrotasks()
+
+  // execute the callback.
+  if (args) {
+    callback.apply(null, args)
+  } else {
+    callback()
+  }
 }
 
 function startCapturingImmediates() {
@@ -132,14 +98,12 @@ type ActiveQueueItem = {
   isCleared: false
   callback: (...args: any[]) => any
   args: any[] | null
-  hasRef: boolean
-  immediateObject: BufferedImmediate
+  immediateObject: NextImmediate
 }
 type ClearedQueueItem = {
   isCleared: true
   callback: null
   args: null
-  hasRef: null
   immediateObject: null
 }
 
@@ -148,7 +112,6 @@ function clearQueueItem(originalQueueItem: QueueItem) {
   queueItem.isCleared = true
   queueItem.callback = null
   queueItem.args = null
-  queueItem.hasRef = null
   queueItem.immediateObject = null
 }
 
@@ -220,13 +183,12 @@ function patchedSetImmediate(): NodeJS.Immediate {
   let args: any[] | null =
     arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : null
 
-  const immediateObject = new BufferedImmediate()
+  const immediateObject = new NextImmediate()
 
   const queueItem: ActiveQueueItem = {
     isCleared: false,
     callback,
     args,
-    hasRef: true,
     immediateObject,
   }
   queuedImmediates.push(queueItem)
@@ -256,9 +218,9 @@ function patchedSetImmediatePromisify<T = void>(
     }
 
     const immediate = patchedSetImmediate(resolve, value)
-    if (options?.ref === false) {
-      immediate.unref()
-    }
+
+    // Note that we're ignoring `options.ref`, because `unref()` has no effect
+    // on our patched immediates
 
     if (signal) {
       signal.addEventListener(
@@ -279,7 +241,7 @@ const patchedClearImmediate = (
   immediateObject: NodeJS.Immediate | undefined
 ) => {
   if (immediateObject && INTERNALS in immediateObject) {
-    ;(immediateObject as BufferedImmediate)[Symbol.dispose]()
+    ;(immediateObject as NextImmediate)[Symbol.dispose]()
   } else {
     originalClearImmediate(immediateObject)
   }
@@ -289,50 +251,41 @@ const patchedClearImmediate = (
 
 const INTERNALS: unique symbol = Symbol.for('next.Immediate.internals')
 
-type QueuedImmediateInternals =
-  | {
-      queueItem: ActiveQueueItem | null
-      nativeImmediate: null
-    }
-  | {
-      queueItem: null
-      nativeImmediate: NodeJS.Immediate
-    }
+type NextImmediateInternals = {
+  /** Stored to reflect `ref()`/`unref()` calls, but has no effect otherwise */
+  hasRef: boolean
+  queueItem: ActiveQueueItem | null
+}
 
 /** Makes sure that we're implementing all the public `Immediate` methods */
 interface NativeImmediate extends NodeJS.Immediate {}
 
 /** Implements a shim for the native `Immediate` class returned by `setImmediate` */
-class BufferedImmediate implements NativeImmediate {
-  [INTERNALS]: QueuedImmediateInternals = {
+class NextImmediate implements NativeImmediate {
+  [INTERNALS]: NextImmediateInternals = {
     queueItem: null,
-    nativeImmediate: null,
+    hasRef: true,
   }
   hasRef() {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
-      return internals.queueItem.hasRef
-    } else if (internals.nativeImmediate) {
-      return internals.nativeImmediate.hasRef()
+      return internals.hasRef
     } else {
+      // if we're no longer queued (cleared or executed), hasRef is always false
       return false
     }
   }
   ref() {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
-      internals.queueItem.hasRef = true
-    } else if (internals.nativeImmediate) {
-      internals.nativeImmediate.ref()
+      internals.hasRef = true
     }
     return this
   }
   unref() {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
-      internals.queueItem.hasRef = false
-    } else if (internals.nativeImmediate) {
-      internals.nativeImmediate.unref()
+      internals.hasRef = false
     }
     return this
   }
@@ -348,9 +301,6 @@ class BufferedImmediate implements NativeImmediate {
       const queueItem = internals.queueItem
       internals.queueItem = null
       clearQueueItem(queueItem)
-    } else if (internals.nativeImmediate) {
-      // If we executed the queue, and we have a native immediate.
-      originalClearImmediate(internals.nativeImmediate)
     }
   }
 }
