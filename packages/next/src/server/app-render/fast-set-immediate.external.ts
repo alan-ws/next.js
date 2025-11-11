@@ -1,5 +1,6 @@
 import { promisify } from 'node:util'
 import { InvariantError } from '../../shared/lib/invariant-error'
+import { bindSnapshot } from './async-local-storage'
 
 let isInstalled = false
 let isEnabled = false
@@ -183,11 +184,15 @@ function patchedSetImmediate(): NodeJS.Immediate {
   let args: any[] | null =
     arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : null
 
+  const callbackWithAsyncContext = bindSnapshot(
+    // TODO: bindSnapshot says we shouldn't pass a named function to it, does that apply here?
+    (...innerArgs: any[]) => callback(...innerArgs)
+  )
   const immediateObject = new NextImmediate()
 
   const queueItem: ActiveQueueItem = {
     isCleared: false,
-    callback,
+    callback: callbackWithAsyncContext,
     args,
     immediateObject,
   }
