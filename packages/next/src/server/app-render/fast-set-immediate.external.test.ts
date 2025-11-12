@@ -373,40 +373,88 @@ describe('alternate sources of immediates', () => {
   })
 })
 
-it('propagates AsyncLocalStorage', async () => {
-  const { log, logs } = createLogger()
-  const done = createPromiseWithResolvers<void>()
-  const Ctx = new AsyncLocalStorage<string>()
+describe('async context propagation', () => {
+  it('propagates AsyncLocalStorage to setImmediate', async () => {
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+    const Ctx = new AsyncLocalStorage<string>()
 
-  setTimeout(() => {
-    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
-    Ctx.run('hello', () => {
-      log(`timeout 1 :: ${Ctx.getStore()}`)
-      setImmediate(() => {
-        log(`timeout 1 -> immediate 1 :: ${Ctx.getStore()}`)
+    Ctx.run('outer', () => {
+      setTimeout(() => {
+        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+        log(`timeout 1 :: ${Ctx.getStore()}`)
         setImmediate(() => {
-          log(`timeout 1 -> immediate 1 -> immediate 1 :: ${Ctx.getStore()}`)
+          // The outer context should be readable here
+          log(`timeout 1 -> immediate 1 :: ${Ctx.getStore()}`)
+          // Shadow the outer context
+          Ctx.run('inner', () => {
+            setImmediate(() => {
+              // The inner context should be readable here
+              log(
+                `timeout 1 -> immediate 1 -> immediate 1 :: ${Ctx.getStore()}`
+              )
+            })
+          })
         })
       })
     })
-  })
-  setTimeout(() => {
-    log('timeout 2')
-    done.resolve()
+    setTimeout(() => {
+      // The context should not be readable here
+      log(`timeout 2 :: ${Ctx.getStore()}`)
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1 :: outer',
+      // ======================
+      'timeout 1 -> immediate 1 :: outer',
+      // ======================
+      'timeout 1 -> immediate 1 -> immediate 1 :: inner',
+      // ===================================
+      'timeout 2 :: undefined',
+    ])
   })
 
-  await done.promise
+  it('does not break AsyncLocalStorage propagation in process.nextTick', async () => {
+    // We don't alter the implementation of `process.nextTick` much,
+    // but we do patch it, so as a sanity check it's worth verifying that
+    // we're not breaking async context propagation.
 
-  expect(logs).toEqual([
-    // ===================================
-    'timeout 1 :: hello',
-    // ======================
-    'timeout 1 -> immediate 1 :: hello',
-    // ======================
-    'timeout 1 -> immediate 1 -> immediate 1 :: hello',
-    // ===================================
-    'timeout 2',
-  ])
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+    const Ctx = new AsyncLocalStorage<string>()
+
+    Ctx.run('hello', () => {
+      setTimeout(() => {
+        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+
+        log(`timeout 1 :: ${Ctx.getStore()}`)
+        process.nextTick(() => {
+          // the context should be readable here
+          log(`timeout 1 -> nextTick :: ${Ctx.getStore()}`)
+        })
+      })
+    })
+    setTimeout(() => {
+      // The context should not be readable here
+      log(`timeout 2 :: ${Ctx.getStore()}`)
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1 :: hello',
+      // ======================
+      'timeout 1 -> nextTick :: hello',
+      // ===================================
+      'timeout 2 :: undefined',
+    ])
+  })
 })
 
 describe('allows cancelling immediates', () => {
