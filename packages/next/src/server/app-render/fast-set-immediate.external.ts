@@ -131,6 +131,9 @@ function performWork() {
   clearQueueItem(queueItem)
 
   // schedule the loop again in case there's more immediates after this.
+  // if this is the last immediate, this also ensures that [ticks and microtasks
+  // spawned from the current immediate] are executed before we let the event loop
+  // move on to the next task.
   scheduleWorkAfterTicksAndMicrotasks()
 
   // execute the immediate.

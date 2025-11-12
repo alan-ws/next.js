@@ -230,6 +230,51 @@ it('runs immediates scheduled in nextTick', async () => {
   ])
 })
 
+it('runs ticks and microtasks from immediates before moving onto the next task', async () => {
+  const { log, logs } = createLogger()
+  const done = createPromiseWithResolvers<void>()
+
+  setTimeout(() => {
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+
+    log('timeout 1')
+    setImmediate(() => {
+      log('timeout 1 -> immediate 1')
+      queueMicrotask(() => {
+        log('timeout 1 -> immediate 1 -> microtask 1')
+        queueMicrotask(() => {
+          log('timeout 1 -> immediate 1 -> microtask 1 -> microtask 1')
+        })
+        process.nextTick(() => {
+          log('timeout 1 -> immediate 1 -> microtask 1 -> nextTick')
+        })
+      })
+      process.nextTick(() => {
+        log('timeout 1 -> immediate 1 -> nextTick')
+      })
+    })
+  })
+  setTimeout(() => {
+    log('timeout 2')
+    done.resolve()
+  })
+
+  await done.promise
+
+  expect(logs).toEqual([
+    // ===================================
+    'timeout 1',
+    // ======================
+    'timeout 1 -> immediate 1',
+    'timeout 1 -> immediate 1 -> nextTick',
+    'timeout 1 -> immediate 1 -> microtask 1',
+    'timeout 1 -> immediate 1 -> microtask 1 -> microtask 1',
+    'timeout 1 -> immediate 1 -> microtask 1 -> nextTick',
+    // ===================================
+    'timeout 2',
+  ])
+})
+
 describe('alternate sources of immediates', () => {
   it('promisify(setImmediate)', async () => {
     // `setImmediate` defines a `util.promisify.custom`, and so does our patch.
