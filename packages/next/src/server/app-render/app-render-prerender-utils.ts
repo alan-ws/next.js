@@ -1,5 +1,8 @@
 import { InvariantError } from '../../shared/lib/invariant-error'
-import { DANGEROUSLY_runPendingImmediatesAfterCurrentTask } from './fast-set-immediate.external'
+import {
+  DANGEROUSLY_runPendingImmediatesAfterCurrentTask,
+  expectNoPendingImmediates,
+} from './fast-set-immediate.external'
 
 /**
  * This is a utility function to make scheduling sequential tasks that run back to back easier.
@@ -17,8 +20,8 @@ export function prerenderAndAbortInSequentialTasks<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: Promise<R>
       setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
           pendingResult = prerender()
           pendingResult.catch(() => {})
         } catch (err) {
@@ -26,8 +29,13 @@ export function prerenderAndAbortInSequentialTasks<R>(
         }
       }, 0)
       setTimeout(() => {
-        abort()
-        resolve(pendingResult)
+        try {
+          expectNoPendingImmediates()
+          abort()
+          resolve(pendingResult)
+        } catch (err) {
+          reject(err)
+        }
       }, 0)
     })
   }
@@ -50,8 +58,8 @@ export function prerenderAndAbortInSequentialTasksWithStages<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: Promise<R>
       setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
           pendingResult = prerender()
           pendingResult.catch(() => {})
         } catch (err) {
@@ -59,12 +67,21 @@ export function prerenderAndAbortInSequentialTasksWithStages<R>(
         }
       }, 0)
       setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
-        advanceStage()
+        try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+          advanceStage()
+        } catch (err) {
+          reject(err)
+        }
       }, 0)
       setTimeout(() => {
-        abort()
-        resolve(pendingResult)
+        try {
+          expectNoPendingImmediates()
+          abort()
+          resolve(pendingResult)
+        } catch (err) {
+          reject(err)
+        }
       }, 0)
     })
   }

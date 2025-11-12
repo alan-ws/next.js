@@ -1,5 +1,8 @@
 import { InvariantError } from '../../shared/lib/invariant-error'
-import { DANGEROUSLY_runPendingImmediatesAfterCurrentTask } from './fast-set-immediate.external'
+import {
+  DANGEROUSLY_runPendingImmediatesAfterCurrentTask,
+  expectNoPendingImmediates,
+} from './fast-set-immediate.external'
 
 /**
  * This is a utility function to make scheduling sequential tasks that run back to back easier.
@@ -17,16 +20,21 @@ export function scheduleInSequentialTasks<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: R | Promise<R>
       setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
           pendingResult = render()
         } catch (err) {
           reject(err)
         }
       }, 0)
       setTimeout(() => {
-        followup()
-        resolve(pendingResult)
+        try {
+          expectNoPendingImmediates()
+          followup()
+          resolve(pendingResult)
+        } catch (err) {
+          reject(err)
+        }
       }, 0)
     })
   }
@@ -50,8 +58,8 @@ export function pipelineInSequentialTasks<A, B, C>(
     return new Promise((resolve, reject) => {
       let oneResult: A | undefined = undefined
       setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
           oneResult = one()
         } catch (err) {
           clearTimeout(twoId)
@@ -62,10 +70,10 @@ export function pipelineInSequentialTasks<A, B, C>(
 
       let twoResult: B | undefined = undefined
       const twoId = setTimeout(() => {
-        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         // if `one` threw, then this timeout would've been cleared,
         // so if we got here, we're guaranteed to have a value.
         try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
           twoResult = two(oneResult!)
         } catch (err) {
           clearTimeout(threeId)
@@ -77,6 +85,7 @@ export function pipelineInSequentialTasks<A, B, C>(
         // if `two` threw, then this timeout would've been cleared,
         // so if we got here, we're guaranteed to have a value.
         try {
+          expectNoPendingImmediates()
           resolve(three(twoResult!))
         } catch (err) {
           reject(err)

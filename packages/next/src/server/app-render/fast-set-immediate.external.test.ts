@@ -3,6 +3,7 @@ import { createPromiseWithResolvers } from '../../shared/lib/promise-with-resolv
 import {
   install,
   DANGEROUSLY_runPendingImmediatesAfterCurrentTask,
+  expectNoPendingImmediates,
 } from './fast-set-immediate.external'
 
 install()
@@ -706,9 +707,16 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
         log('timeout 1 -> immediate 2')
       })
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      // This ensures that we don't fall into this task in an invalid state.
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -722,7 +730,7 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
       'uncaught exception',
       // ======================
       'timeout 1 -> immediate 2',
-      // ======================
+      // ===================================
       'timeout 2',
     ])
     expect(uncaughtException).toBe(error)
@@ -788,9 +796,16 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
         log('timeout 1 -> immediate 2')
       })
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      // This ensures that we don't fall into this task in an invalid state.
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -810,7 +825,7 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
       // FIXME: ...but it happens here, after the second immediate:
       'unhandled rejection',
 
-      // ======================
+      // ===================================
       'timeout 2',
     ])
     expect(uncaughtException).toBe(error)

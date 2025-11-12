@@ -2,11 +2,18 @@ import { promisify } from 'node:util'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import { bindSnapshot } from './async-local-storage'
 
+enum ExecutionState {
+  None = 1,
+  Waiting = 2,
+  Working = 3,
+}
+
 let isInstalled = false
-let isEnabled = false
 let wasEnabledAtLeastOnce = false
+
 const queuedImmediates: QueueItem[] = []
 let pendingNextTicks = 0
+let executionState: ExecutionState = ExecutionState.None
 
 const originalSetImmediate = globalThis.setImmediate
 const originalClearImmediate = globalThis.clearImmediate
@@ -91,7 +98,31 @@ export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
   scheduleWorkAfterTicksAndMicrotasks()
 }
 
+export function expectNoPendingImmediates() {
+  if (executionState !== ExecutionState.None) {
+    const prevExecutionState = executionState
+
+    // Reset the state as best we can to prevent further crashes.
+    // Otherwise, any subsequent call to `DANGEROUSLY_runPendingImmediatesAfterCurrentTask`
+    // would error, requiring a server restart to fix.
+    executionState = ExecutionState.None
+    queuedImmediates.length = 0
+    // don't reset `pendingNextTicks` -- if we still have pending ticks,
+    // they might decrement the counter below 0. This should reset organically
+    // as the ticks execute.
+
+    throw new InvariantError(
+      `Expected all captured immediates to have been executed (state: ${ExecutionState[prevExecutionState]})`
+    )
+  }
+}
+
 function scheduleWorkAfterTicksAndMicrotasks() {
+  if (executionState !== ExecutionState.Waiting) {
+    throw new InvariantError(
+      `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[executionState]})`
+    )
+  }
   originalNextTick(() => {
     queueMicrotask(() => {
       originalNextTick(() => {
@@ -109,6 +140,13 @@ function scheduleWorkAfterTicksAndMicrotasks() {
 
 function performWork() {
   debug?.(`scheduler :: performing work`)
+
+  if (executionState !== ExecutionState.Waiting) {
+    throw new InvariantError(
+      `performWork can only be called while waiting (state: ${ExecutionState[executionState]})`
+    )
+  }
+  executionState = ExecutionState.Working
 
   // Find the first (if any) queued immediate that wasn't cleared
   let queueItem: ActiveQueueItem | null = null
@@ -131,12 +169,6 @@ function performWork() {
 
   immediateObject[INTERNALS].queueItem = null
   clearQueueItem(queueItem)
-
-  // schedule the loop again in case there's more immediates after this.
-  // if this is the last immediate, this also ensures that [ticks and microtasks
-  // spawned from the current immediate] are executed before we let the event loop
-  // move on to the next task.
-  scheduleWorkAfterTicksAndMicrotasks()
 
   // Execute the immediate.
 
@@ -170,13 +202,27 @@ function performWork() {
     didThrow = true
     thrownValue = err
   }
+
+  executionState = ExecutionState.Waiting
+
+  // schedule the loop again in case there's more immediates after this.
+  // if this is the last immediate, this also ensures that [ticks and microtasks
+  // spawned from the current immediate] are executed before we let the event loop
+  // move on to the next task.
+  scheduleWorkAfterTicksAndMicrotasks()
 }
 
 function startCapturingImmediates() {
   if (!isInstalled) {
     throw new InvariantError('install() was not called')
   }
-  isEnabled = true
+
+  if (executionState !== ExecutionState.None) {
+    throw new InvariantError(
+      `Cannot start capturing immediates again without finishing the previous task (state: ${ExecutionState[executionState]})`
+    )
+  }
+  executionState = ExecutionState.Waiting
   wasEnabledAtLeastOnce = true
 }
 
@@ -184,10 +230,16 @@ function stopCapturingImmediates() {
   if (!isInstalled) {
     throw new InvariantError('install() was not called')
   }
-  if (!isEnabled) {
-    return
+
+  // This check enforces that we run performWork at least once before stopping
+  // to make sure that we've waited for all the ticks and microtasks
+  // that might've scheduled some immediates after sync code.
+  if (executionState !== ExecutionState.Working) {
+    throw new InvariantError(
+      `Cannot stop capturing immediates before execution is finished (state: ${ExecutionState[executionState]})`
+    )
   }
-  isEnabled = false
+  executionState = ExecutionState.None
 }
 
 type QueueItem = ActiveQueueItem | ClearedQueueItem
@@ -219,7 +271,7 @@ function patchedNextTick<TArgs extends any[]>(
   ...args: TArgs
 ): void
 function patchedNextTick() {
-  if (!isEnabled) {
+  if (executionState === ExecutionState.None) {
     return originalNextTick.apply(
       null,
       // @ts-expect-error: this is valid, but typescript doesn't get it
@@ -265,7 +317,7 @@ function patchedSetImmediate<TArgs extends any[]>(
 ): NodeJS.Immediate
 function patchedSetImmediate(callback: (args: void) => void): NodeJS.Immediate
 function patchedSetImmediate(): NodeJS.Immediate {
-  if (!isEnabled) {
+  if (executionState === ExecutionState.None) {
     return originalSetImmediate.apply(
       null,
       // @ts-expect-error: this is valid, but typescript doesn't get it
@@ -309,7 +361,7 @@ function patchedSetImmediatePromise<T = void>(
   value: T,
   options?: import('node:timers').TimerOptions
 ): Promise<T> {
-  if (!isEnabled) {
+  if (executionState === ExecutionState.None) {
     const originalPromisify: (typeof setImmediate)['__promisify__'] =
       // @ts-expect-error: the types for `promisify.custom` are strange
       originalSetImmediate[promisify.custom]

@@ -909,5 +909,10 @@
   "908": "Invalid flags should be run as node detached-flush dev ./path-to/project [eventsFile]",
   "909": "Failed to load SWC binary for %s/%s, see more info here: https://nextjs.org/docs/messages/failed-loading-swc",
   "910": "install() was not called",
-  "911": "The \"callback\" argument must be of type function. Received %s"
+  "911": "The \"callback\" argument must be of type function. Received %s",
+  "912": "Cannot start capturing immediates again without finishing the previous task (state: %s)",
+  "913": "performWork can only be called while waiting (state: %s)",
+  "914": "Cannot stop capturing immediates before execution is finished (state: %s)",
+  "915": "Expected all captured immediates to have been executed (state: %s)",
+  "916": "scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: %s)"
 }
