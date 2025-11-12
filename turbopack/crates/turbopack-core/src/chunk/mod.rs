@@ -46,7 +46,7 @@ use crate::{
     },
     output::OutputAssets,
     reference::ModuleReference,
-    resolve::{ExportUsage, ImportUsage},
+    resolve::BindingUsage,
 };
 
 /// A module id, which can be a number or string
@@ -422,13 +422,8 @@ pub trait ChunkableModuleReference: ModuleReference + ValueToString {
     }
 
     #[turbo_tasks::function]
-    fn export_usage(self: Vc<Self>) -> Vc<ExportUsage> {
-        ExportUsage::all()
-    }
-
-    #[turbo_tasks::function]
-    fn import_usage(self: Vc<Self>) -> Vc<ImportUsage> {
-        ImportUsage::global()
+    fn binding_usage(self: Vc<Self>) -> Vc<BindingUsage> {
+        BindingUsage::all()
     }
 }
 
