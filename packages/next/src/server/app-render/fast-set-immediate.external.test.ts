@@ -765,24 +765,59 @@ describe('allows cancelling immediates', () => {
 })
 
 describe('uncaught errors in setImmediate do not affect surrounding tasks or other immediates', () => {
-  it('uncaught exception', async () => {
+  type TriggeredUncaught = {
+    error: unknown
+    kind: 'uncaughtException' | 'unhandledRejection'
+  }
+
+  const trackUncaughtErrors = (
+    handler: (
+      error: unknown,
+      kind: 'uncaughtException' | 'unhandledRejection'
+    ) => void
+  ) => {
+    // We have to use this instead of `process.on("uncaughtException")`,
+    // because if an actual "uncaughtException" event fires, Jest will fail the test.
+    const onUncaughtException = (err: unknown) => {
+      handler(err, 'uncaughtException')
+    }
+    process.setUncaughtExceptionCaptureCallback(onUncaughtException)
+
+    // If an unhandled rejection occurs, Jest will fail the test.
+    // Here, we're triggering one deliberately, so we need to work around Jest's behavior.
+    // This seems to be the best we can do, and there's no official solution:
+    // https://github.com/jestjs/jest/issues/5620
+    const prevListeners = process.rawListeners('unhandledRejection')
+    process.removeAllListeners('unhandledRejection')
+    const onUnhandledRejection = (err: unknown) => {
+      handler(err, 'unhandledRejection')
+    }
+    process.on('unhandledRejection', onUnhandledRejection)
+
+    return {
+      [Symbol.dispose]() {
+        process.setUncaughtExceptionCaptureCallback(null)
+
+        process.off('unhandledRejection', onUnhandledRejection)
+        for (const listener of prevListeners) {
+          process.on(
+            'unhandledRejection',
+            listener as NodeJS.UnhandledRejectionListener
+          )
+        }
+      },
+    }
+  }
+
+  it('sync errors trigger uncaughtException', async () => {
     const { log, logs } = createLogger()
     const done = createPromiseWithResolvers<void>()
 
-    let uncaughtException: unknown
-    const onUncaughtException = (err: unknown) => {
-      log('uncaught exception')
-      uncaughtException = err
-    }
-
-    // We have to use this instead of `process.on("uncaughtException")`,
-    // because if an actual "uncaughtException" event fires, Jest will fail the test.
-    process.setUncaughtExceptionCaptureCallback(onUncaughtException)
-    using _ = {
-      [Symbol.dispose]() {
-        process.setUncaughtExceptionCaptureCallback(null)
-      },
-    }
+    let triggeredError: TriggeredUncaught | undefined = undefined
+    using _ = trackUncaughtErrors((error, kind) => {
+      log(kind)
+      triggeredError = { error, kind }
+    })
 
     const error = new Error('kaboom')
 
@@ -818,49 +853,143 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
 
     await done.promise
 
+    expect(triggeredError).toEqual({ error, kind: 'uncaughtException' })
+
     expect(logs).toEqual([
       // ===================================
       'timeout 1',
       // ======================
       'timeout 1 -> immediate 1',
       'timeout 1 -> immediate 1 -> nextTick', // undesirable
-      'uncaught exception',
+      'uncaughtException',
       // ======================
       'timeout 1 -> immediate 2',
       // ===================================
       'timeout 2',
     ])
-    expect(uncaughtException).toBe(error)
+  })
+
+  it('sync errors in nextTick trigger uncaughtException', async () => {
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+
+    let triggeredError: TriggeredUncaught | undefined = undefined
+    using _ = trackUncaughtErrors((error, kind) => {
+      log(kind)
+      triggeredError = { error, kind }
+    })
+
+    const error = new Error('kaboom')
+
+    setTimeout(() => {
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+      log('timeout 1')
+      setImmediate(() => {
+        log('timeout 1 -> immediate 1')
+        process.nextTick(() => {
+          log('timeout 1 -> immediate 1 -> nextTick')
+          throw error
+        })
+      })
+      setImmediate(() => {
+        log('timeout 1 -> immediate 2')
+      })
+    })
+
+    setTimeout(() => {
+      log('timeout 2')
+      // This ensures that we don't fall into this task in an invalid state.
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
+    })
+
+    await done.promise
+
+    expect(triggeredError).toEqual({ error, kind: 'uncaughtException' })
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      'timeout 1 -> immediate 1 -> nextTick',
+      'uncaughtException',
+      // ======================
+      'timeout 1 -> immediate 2',
+      // ===================================
+      'timeout 2',
+    ])
+  })
+
+  it('sync errors in nextTick before immediate', async () => {
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+
+    let triggeredError: TriggeredUncaught | undefined = undefined
+    using _ = trackUncaughtErrors((error, kind) => {
+      log(kind)
+      triggeredError = { error, kind }
+    })
+
+    const error = new Error('kaboom')
+
+    setTimeout(() => {
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+      log('timeout 1')
+      process.nextTick(() => {
+        log('timeout 1 -> nextTick')
+        throw error
+      })
+      setImmediate(() => {
+        log('timeout 1 -> immediate 1')
+      })
+      setImmediate(() => {
+        log('timeout 1 -> immediate 2')
+      })
+    })
+
+    setTimeout(() => {
+      log('timeout 2')
+      // This ensures that we don't fall into this task in an invalid state.
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
+    })
+
+    await done.promise
+
+    expect(triggeredError).toEqual({ error, kind: 'uncaughtException' })
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      'timeout 1 -> nextTick',
+      'uncaughtException',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ======================
+      'timeout 1 -> immediate 2',
+      // ===================================
+      'timeout 2',
+    ])
   })
 
   it('unhandled rejection', async () => {
     const { log, logs } = createLogger()
     const done = createPromiseWithResolvers<void>()
 
-    let uncaughtException: unknown
-    const onUnhandledRejection = (err: unknown) => {
-      log('unhandled rejection')
-      uncaughtException = err
-    }
-
-    // If an unhandled rejection occurs, Jest will fail the test.
-    // Here, we're triggering one deliberately, so we need to work around Jest's behavior.
-    // This seems to be the best we can do, and there's no official solution:
-    // https://github.com/jestjs/jest/issues/5620
-    const prevListeners = process.rawListeners('unhandledRejection')
-    process.removeAllListeners('unhandledRejection')
-    using _ = {
-      [Symbol.dispose]() {
-        for (const listener of prevListeners) {
-          process.on(
-            'unhandledRejection',
-            listener as NodeJS.UnhandledRejectionListener
-          )
-        }
-      },
-    }
-
-    process.once('unhandledRejection', onUnhandledRejection)
+    let triggeredError: TriggeredUncaught | undefined = undefined
+    using _ = trackUncaughtErrors((error, kind) => {
+      log(kind)
+      triggeredError = { error, kind }
+    })
 
     const error = new Error('kaboom')
 
@@ -907,6 +1036,8 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
 
     await done.promise
 
+    expect(triggeredError).toEqual({ error, kind: 'unhandledRejection' })
+
     expect(logs).toEqual([
       // ===================================
       'timeout 1',
@@ -914,17 +1045,16 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
       'timeout 1 -> immediate 1',
 
       // // FIXME: we would like to observe the rejection here...
-      // 'unhandled rejection',
+      // 'unhandledRejection',
 
       // ======================
       'timeout 1 -> immediate 2',
 
       // FIXME: ...but it happens here, after the second immediate:
-      'unhandled rejection',
+      'unhandledRejection',
 
       // ===================================
       'timeout 2',
     ])
-    expect(uncaughtException).toBe(error)
   })
 })

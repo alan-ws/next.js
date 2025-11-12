@@ -310,10 +310,27 @@ function patchedNextTick() {
       `scheduler :: process.nextTick executing (still pending: ${pendingNextTicks})`
     )
 
-    if (args !== null) {
-      callback.apply(null, args)
-    } else {
-      callback()
+    try {
+      if (args !== null) {
+        callback.apply(null, args)
+      } else {
+        callback()
+      }
+    } catch (err) {
+      // If we're enabled, we care very much about the behavior (and ordering)
+      // of nextTick, because we'll use it to run immediates.
+      // Sync errors in a nextTick trigger 'uncaughtException'
+      // but, bizarrely, also sometimes make subsequent timeouts run
+      // before any other ticks, which subverts the ordering we want.
+      // As an ugly workaround, we rethrow the error in a microtask,
+      // which still triggers 'uncaughtException' but doesn't seem to have
+      // the same ordering problem.
+      queueMicrotask(() => {
+        debug?.(
+          `scheduler :: rethrowing sync error from nextTick in a microtask`
+        )
+        throw err
+      })
     }
   })
 }
