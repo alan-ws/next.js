@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createPromiseWithResolvers } from '../../shared/lib/promise-with-resolvers'
 import {
   install,
-  runPendingImmediatesAfterCurrentTask,
+  DANGEROUSLY_runPendingImmediatesAfterCurrentTask,
 } from './fast-set-immediate.external'
 
 install()
@@ -30,7 +30,7 @@ it('runs immediates after each task', async () => {
   const done = createPromiseWithResolvers<void>()
 
   setTimeout(() => {
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
     log('timeout 1')
     setImmediate(() => {
@@ -68,7 +68,7 @@ it('runs immediates after each task', async () => {
     })
   })
   setTimeout(() => {
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
     log('timeout 2')
     setImmediate(() => {
@@ -115,7 +115,7 @@ it('only affects the task it is called in', async () => {
   const done = createPromiseWithResolvers<void>()
 
   setTimeout(() => {
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
     log('timeout 1')
     setImmediate(() => {
@@ -166,7 +166,7 @@ it('does not run immediates scheduled before it was called', async () => {
       done.resolve()
     })
 
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
     setImmediate(() => {
       log('timeout 1 -> immediate 2 (fast)')
@@ -195,7 +195,7 @@ it('runs immediates scheduled in nextTick', async () => {
   const done = createPromiseWithResolvers<void>()
 
   setTimeout(() => {
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
     log('timeout 1')
     process.nextTick(() => {
@@ -240,7 +240,7 @@ describe('alternate sources of immediates', () => {
     const promisifiedSetImmediate = promisify(setImmediate)
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       promisifiedSetImmediate().then(() => {
@@ -271,7 +271,7 @@ describe('alternate sources of immediates', () => {
     const timers = require('node:timers') as typeof import('node:timers')
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       timers.setImmediate(() => {
@@ -303,7 +303,7 @@ describe('alternate sources of immediates', () => {
       require('node:timers/promises') as typeof import('node:timers/promises')
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       timersPromises.setImmediate().then(() => {
@@ -334,7 +334,7 @@ it('propagates AsyncLocalStorage', async () => {
   const Ctx = new AsyncLocalStorage<string>()
 
   setTimeout(() => {
-    runPendingImmediatesAfterCurrentTask()
+    DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
     Ctx.run('hello', () => {
       log(`timeout 1 :: ${Ctx.getStore()}`)
       setImmediate(() => {
@@ -371,7 +371,7 @@ describe('allows cancelling immediates', () => {
     const done = createPromiseWithResolvers<void>()
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       setImmediate(() => {
@@ -405,7 +405,7 @@ describe('allows cancelling immediates', () => {
     const done = createPromiseWithResolvers<void>()
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       setImmediate(() => {
@@ -441,7 +441,7 @@ describe('allows cancelling immediates', () => {
     const done = createPromiseWithResolvers<void>()
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       setImmediate(() => {
@@ -481,7 +481,7 @@ describe('allows cancelling immediates', () => {
     let thrownOnAbort: unknown
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       setImmediate(() => {
@@ -533,7 +533,7 @@ describe('allows cancelling immediates', () => {
     let thrownOnAbort: unknown
 
     setTimeout(() => {
-      runPendingImmediatesAfterCurrentTask()
+      DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
       log('timeout 1')
       setImmediate(() => {

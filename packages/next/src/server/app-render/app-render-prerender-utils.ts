@@ -1,5 +1,5 @@
 import { InvariantError } from '../../shared/lib/invariant-error'
-import { runPendingImmediatesAfterCurrentTask } from './fast-set-immediate.external'
+import { DANGEROUSLY_runPendingImmediatesAfterCurrentTask } from './fast-set-immediate.external'
 
 /**
  * This is a utility function to make scheduling sequential tasks that run back to back easier.
@@ -17,7 +17,7 @@ export function prerenderAndAbortInSequentialTasks<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: Promise<R>
       setTimeout(() => {
-        runPendingImmediatesAfterCurrentTask()
+        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
           pendingResult = prerender()
           pendingResult.catch(() => {})
@@ -50,7 +50,7 @@ export function prerenderAndAbortInSequentialTasksWithStages<R>(
     return new Promise((resolve, reject) => {
       let pendingResult: Promise<R>
       setTimeout(() => {
-        runPendingImmediatesAfterCurrentTask()
+        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         try {
           pendingResult = prerender()
           pendingResult.catch(() => {})
@@ -59,7 +59,7 @@ export function prerenderAndAbortInSequentialTasksWithStages<R>(
         }
       }, 0)
       setTimeout(() => {
-        runPendingImmediatesAfterCurrentTask()
+        DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
         advanceStage()
       }, 0)
       setTimeout(() => {

@@ -29,7 +29,64 @@ export function install() {
   isInstalled = true
 }
 
-export function runPendingImmediatesAfterCurrentTask() {
+/**
+ * **WARNING: This function changes the usual behavior of the event loop!**
+ * **Be VERY careful about where you call it.**
+ *
+ * Starts capturing calls to `setImmediate` to run them as "fast immediates".
+ * All calls captured in this way will be executed after the current task
+ * (after ticks from `process.nextTick()` and microtasks scheduled from ticks).
+ * This function needs to be called again in each task that needs the
+ * "fast immediates" behavior.
+ *
+ * ### Motivation
+ *
+ * We don't want `setImmediate` to be considered IO in Cache Components.
+ * To achieve this in a staged (pre)render, we want to allow immediates scheduled
+ * in stage N to run before stage N+1.
+ * Since we schedule stages using sequential `setTimeout`, this isn't possible without
+ * intercepting `setImmediate` and doing the scheduling on our own.
+ * We refer to this as a "fast immediate".
+ *
+ * Notably, this affects React's `scheduleWork` in render, which uses `setImmediate`.
+ * This is desirable -- if async work was scheduled during a stage, then it should
+ * get to run before we finish that stage.
+ *
+ * ### Example
+ *
+ * ```ts
+ * setTimeout(() => {
+ *   runPendingImmediatesAfterCurrentTask()
+ *   console.log("timeout 1")
+ *   setImmediate(() => {
+ *     console.log("immediate!!!")
+ *   })
+ * })
+ * setTimeout(() => {
+ *   console.log("timeout 1")
+ * })
+ * ```
+ * will print
+ *
+ * ```
+ * timeout 1
+ * immediate!!!
+ * timeout 2
+ * ```
+ *
+ * instead of the normal order
+ * ```
+ * timeout 1
+ * timeout 2
+ * immediate!!!
+ * ```
+ *
+ * Recursive `setImmediate` calls will also be executed as "fast immediates".
+ * If multiple immediates were scheduled, `process.nextTick()` (and associated microtasks)
+ * will be allowed to execute between them.
+ * See the unit tests for more examples.
+ * */
+export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
   startCapturingImmediates()
   scheduleWorkAfterTicksAndMicrotasks()
 }
