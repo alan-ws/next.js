@@ -4,6 +4,7 @@ import { bindSnapshot } from './async-local-storage'
 
 let isInstalled = false
 let isEnabled = false
+let wasEnabledAtLeastOnce = false
 const queuedImmediates: QueueItem[] = []
 let pendingNextTicks = 0
 
@@ -88,6 +89,7 @@ function startCapturingImmediates() {
     throw new InvariantError('install() was not called')
   }
   isEnabled = true
+  wasEnabledAtLeastOnce = true
 }
 
 function stopCapturingImmediates() {
@@ -257,7 +259,17 @@ patchedSetImmediate[promisify.custom] = patchedSetImmediatePromise
 const patchedClearImmediate = (
   immediateObject: NodeJS.Immediate | undefined
 ) => {
-  if (immediateObject && INTERNALS in immediateObject) {
+  // NOTE: we defensively check for patched immediates even if we're not
+  // currently capturing immediates, because the objects returned from
+  // the patched setImmediate can be kept around for arbitrarily long.
+  // As an optimization, we only do this if the patch was enabled at least once --
+  // otherwise, no patched objects could've been created.
+  if (
+    wasEnabledAtLeastOnce &&
+    immediateObject &&
+    typeof immediateObject === 'object' &&
+    INTERNALS in immediateObject
+  ) {
     ;(immediateObject as NextImmediate)[Symbol.dispose]()
   } else {
     originalClearImmediate(immediateObject)
