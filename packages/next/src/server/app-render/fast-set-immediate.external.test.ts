@@ -154,6 +154,104 @@ it('only affects the task it is called in', async () => {
   ])
 })
 
+describe('alternate sources of immediates', () => {
+  it('promisify(setImmediate)', async () => {
+    // `setImmediate` defines a `util.promisify.custom`, and so does our patch.
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+
+    const { promisify } = require('node:util') as typeof import('node:util')
+    const promisifiedSetImmediate = promisify(setImmediate)
+
+    setTimeout(() => {
+      runPendingImmediatesAfterCurrentTask()
+
+      log('timeout 1')
+      promisifiedSetImmediate().then(() => {
+        log('timeout 1 -> immediate 1')
+      })
+    })
+    setTimeout(() => {
+      log('timeout 2')
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ======================
+      'timeout 2',
+    ])
+  })
+
+  it('require("node:timers").setImmediate', async () => {
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+
+    const timers = require('node:timers') as typeof import('node:timers')
+
+    setTimeout(() => {
+      runPendingImmediatesAfterCurrentTask()
+
+      log('timeout 1')
+      timers.setImmediate(() => {
+        log('timeout 1 -> immediate 1')
+      })
+    })
+    setTimeout(() => {
+      log('timeout 2')
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ======================
+      'timeout 2',
+    ])
+  })
+
+  it('require("node:timers/promises").setImmediate', async () => {
+    const { log, logs } = createLogger()
+    const done = createPromiseWithResolvers<void>()
+
+    const timersPromises =
+      require('node:timers/promises') as typeof import('node:timers/promises')
+
+    setTimeout(() => {
+      runPendingImmediatesAfterCurrentTask()
+
+      log('timeout 1')
+      timersPromises.setImmediate().then(() => {
+        log('timeout 1 -> immediate 1')
+      })
+    })
+    setTimeout(() => {
+      log('timeout 2')
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ======================
+      'timeout 2',
+    ])
+  })
+})
+
 it('propagates AsyncLocalStorage', async () => {
   const { log, logs } = createLogger()
   const done = createPromiseWithResolvers<void>()

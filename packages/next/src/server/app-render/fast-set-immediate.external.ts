@@ -7,16 +7,22 @@ let isEnabled = false
 const queuedImmediates: QueueItem[] = []
 let pendingNextTicks = 0
 
-// TODO: check if this patches `timers/promises` as well
 const originalSetImmediate = globalThis.setImmediate
 const originalClearImmediate = globalThis.clearImmediate
 const originalNextTick = process.nextTick
 
 export function install() {
-  globalThis.setImmediate =
+  const nodeTimers = require('node:timers') as typeof import('node:timers')
+  globalThis.setImmediate = nodeTimers.setImmediate =
     // Workaround for missing __promisify__ which is not a real property
     patchedSetImmediate as unknown as typeof setImmediate
-  globalThis.clearImmediate = patchedClearImmediate
+  globalThis.clearImmediate = nodeTimers.clearImmediate = patchedClearImmediate
+
+  const nodeTimersPromises =
+    require('node:timers/promises') as typeof import('node:timers/promises')
+  nodeTimersPromises.setImmediate =
+    patchedSetImmediatePromise as typeof import('node:timers/promises').setImmediate
+
   process.nextTick = patchedNextTick
 
   isInstalled = true
@@ -203,7 +209,7 @@ function patchedSetImmediate(): NodeJS.Immediate {
   return immediateObject
 }
 
-function patchedSetImmediatePromisify<T = void>(
+function patchedSetImmediatePromise<T = void>(
   value: T,
   options?: import('node:timers').TimerOptions
 ): Promise<T> {
@@ -240,7 +246,7 @@ function patchedSetImmediatePromisify<T = void>(
   })
 }
 
-patchedSetImmediate[promisify.custom] = patchedSetImmediatePromisify
+patchedSetImmediate[promisify.custom] = patchedSetImmediatePromise
 
 const patchedClearImmediate = (
   immediateObject: NodeJS.Immediate | undefined
