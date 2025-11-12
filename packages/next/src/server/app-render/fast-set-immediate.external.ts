@@ -125,6 +125,8 @@ function performWork() {
     return
   }
 
+  debug?.(`scheduler :: executing queued immediate`)
+
   const { immediateObject, callback, args } = queueItem
 
   immediateObject[INTERNALS].queueItem = null
@@ -136,11 +138,37 @@ function performWork() {
   // move on to the next task.
   scheduleWorkAfterTicksAndMicrotasks()
 
-  // execute the immediate.
-  if (args !== null) {
-    callback.apply(null, args)
-  } else {
-    callback()
+  // Execute the immediate.
+
+  // HACK: if a sync error was thrown, we'll trigger a `uncaughtException`.
+  // However, synchronous `uncaughtException` has some strange timing, and
+  // seems to allow timeouts to run before nextTicks (even those that were already scheduled!).
+  // This would potentially cause us to advance to the next task before we're done running all the immediates.
+  // Delaying the error by a microtask seems to sidestep that, at the cost of slightly
+  // changing when the handler is invoked.
+  // To minimize this, we queue a microtask before running the immediate itself
+  // so that we can rethrow the error as soon as possible.
+  // Note that nextTicks scheduled before the error will run before `uncaughtException`,
+  // which would not happen in vanilla node.
+  let didThrow = false
+  let thrownValue: unknown = undefined
+  queueMicrotask(() => {
+    if (didThrow) {
+      debug?.('scheduler :: rethrowing sync error from immediate in microtask')
+      throw thrownValue
+    }
+  })
+
+  try {
+    if (args !== null) {
+      callback.apply(null, args)
+    } else {
+      callback()
+    }
+  } catch (err) {
+    // We'll rethrow the error in the microtask above.
+    didThrow = true
+    thrownValue = err
   }
 }
 
