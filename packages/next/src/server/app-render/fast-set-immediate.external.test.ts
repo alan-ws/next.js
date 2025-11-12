@@ -13,6 +13,7 @@ function createLogger() {
 
   const log = (...args: any[]) => {
     const { inspect } = require('node:util') as typeof import('node:util')
+    const { writeFileSync } = require('node:fs') as typeof import('node:fs')
 
     let logLine = args
       .map((arg) =>
@@ -21,7 +22,7 @@ function createLogger() {
       .join(' ')
 
     logs.push(logLine)
-    process.stdout.write(logLine + '\n')
+    writeFileSync(process.stdout.fd, logLine + '\n')
   }
   return { logs, log }
 }

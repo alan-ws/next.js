@@ -504,7 +504,6 @@ class NextImmediate implements NativeImmediate {
 
 // ==========================================
 
-// TODO: this causes the scheduler to loop -- apparently the write schedules a nextTick somewhere inside?
 const debug =
   process.env.NEXT_DEBUG_IMMEDIATES !== '1'
     ? undefined
@@ -515,6 +514,8 @@ const debug =
           )
         } else {
           const { inspect } = require('node:util') as typeof import('node:util')
+          const { writeFileSync } =
+            require('node:fs') as typeof import('node:fs')
 
           let logLine =
             args
@@ -524,6 +525,6 @@ const debug =
               .join(' ') + '\n'
 
           logLine = '\x1B[2m' + logLine + '\x1B[22m' // styleText('dim', logLine)
-          process.stdout.write(logLine)
+          writeFileSync(process.stdout.fd, logLine)
         }
       }
