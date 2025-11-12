@@ -154,6 +154,46 @@ it('only affects the task it is called in', async () => {
   ])
 })
 
+it('runs immediates scheduled in nextTick', async () => {
+  const { log, logs } = createLogger()
+  const done = createPromiseWithResolvers<void>()
+
+  setTimeout(() => {
+    runPendingImmediatesAfterCurrentTask()
+
+    log('timeout 1')
+    process.nextTick(() => {
+      setImmediate(() => {
+        log('timeout 1 -> nextTick -> immediate 1')
+        process.nextTick(() => {
+          setImmediate(() => {
+            log(
+              'timeout 1 -> nextTick -> immediate 1 -> nextTick -> immediate 1'
+            )
+          })
+        })
+      })
+    })
+  })
+  setTimeout(() => {
+    log('timeout 2')
+    done.resolve()
+  })
+
+  await done.promise
+
+  expect(logs).toEqual([
+    // ===================================
+    'timeout 1',
+    // ======================
+    'timeout 1 -> nextTick -> immediate 1',
+    // ======================
+    'timeout 1 -> nextTick -> immediate 1 -> nextTick -> immediate 1',
+    // ===================================
+    'timeout 2',
+  ])
+})
+
 describe('alternate sources of immediates', () => {
   it('promisify(setImmediate)', async () => {
     // `setImmediate` defines a `util.promisify.custom`, and so does our patch.
@@ -391,5 +431,108 @@ describe('allows cancelling immediates', () => {
       // ===================================
       'timeout 2',
     ])
+  })
+
+  it('promisified - with an AbortSignal after creating', async () => {
+    const { log, logs } = createLogger()
+
+    const done = createPromiseWithResolvers<void>()
+
+    const { promisify } = require('node:util') as typeof import('node:util')
+    const promisifiedSetImmediate = promisify(setImmediate)
+
+    const abortError = new Error('Stop right there')
+    let thrownOnAbort: unknown
+
+    setTimeout(() => {
+      runPendingImmediatesAfterCurrentTask()
+
+      log('timeout 1')
+      setImmediate(() => {
+        log('timeout 1 -> immediate 1')
+      })
+
+      const abortController = new AbortController()
+
+      promisifiedSetImmediate(undefined, {
+        signal: abortController.signal,
+      }).then(
+        () => {
+          log('timeout 1 -> immediate 2')
+        },
+        (err) => {
+          thrownOnAbort = err
+        }
+      )
+
+      abortController.abort(abortError)
+    })
+    setTimeout(() => {
+      log('timeout 2')
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ===================================
+      'timeout 2',
+    ])
+    expect(thrownOnAbort).toBe(abortError)
+  })
+
+  it('promisified - with an AbortSignal that was already aborted', async () => {
+    const { log, logs } = createLogger()
+
+    const done = createPromiseWithResolvers<void>()
+
+    const { promisify } = require('node:util') as typeof import('node:util')
+    const promisifiedSetImmediate = promisify(setImmediate)
+
+    const abortError = new Error('Stop right there')
+    let thrownOnAbort: unknown
+
+    setTimeout(() => {
+      runPendingImmediatesAfterCurrentTask()
+
+      log('timeout 1')
+      setImmediate(() => {
+        log('timeout 1 -> immediate 1')
+      })
+
+      const abortController = new AbortController()
+      abortController.abort(abortError)
+
+      promisifiedSetImmediate(undefined, {
+        signal: abortController.signal,
+      }).then(
+        () => {
+          log('timeout 1 -> immediate 2')
+        },
+        (err) => {
+          thrownOnAbort = err
+        }
+      )
+    })
+    setTimeout(() => {
+      log('timeout 2')
+      done.resolve()
+    })
+
+    await done.promise
+
+    expect(logs).toEqual([
+      // ===================================
+      'timeout 1',
+      // ======================
+      'timeout 1 -> immediate 1',
+      // ===================================
+      'timeout 2',
+    ])
+    expect(thrownOnAbort).toBe(abortError)
   })
 })
