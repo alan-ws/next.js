@@ -301,7 +301,11 @@ class NextImmediate implements NativeImmediate {
     return this
   }
 
-  // TODO: is this just a noop marker?
+  /**
+   * Node invokes `_onImmediate` when an immediate is executed:
+   * https://github.com/nodejs/node/blob/42d363205715ffa5a4a6d90f4be1311487053d65/lib/internal/timers.js#L504
+   * It's visible on the public types, so we want to have it here for parity, but it's a noop.
+   * */
   _onImmediate() {}
 
   [Symbol.dispose]() {
