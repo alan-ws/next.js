@@ -75,8 +75,8 @@ function performWork() {
   // schedule the loop again in case there's more immediates after this.
   scheduleWorkAfterTicksAndMicrotasks()
 
-  // execute the callback.
-  if (args) {
+  // execute the immediate.
+  if (args !== null) {
     callback.apply(null, args)
   } else {
     callback()
@@ -150,8 +150,9 @@ function patchedNextTick() {
     `scheduler :: process.nextTick called (previous pending: ${pendingNextTicks})`
   )
 
-  // TODO: avoid unnecessary ...args
-  const [callback, ...args] = arguments
+  const callback: (...args: any[]) => any = arguments[0]
+  const args: any[] | null =
+    arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : null
 
   pendingNextTicks += 1
   return originalNextTick(() => {
@@ -159,7 +160,12 @@ function patchedNextTick() {
     debug?.(
       `scheduler :: process.nextTick executing (still pending: ${pendingNextTicks})`
     )
-    callback(...args)
+
+    if (args !== null) {
+      callback.apply(null, args)
+    } else {
+      callback()
+    }
   })
 }
 
@@ -187,7 +193,7 @@ function patchedSetImmediate(): NodeJS.Immediate {
   }
 
   const callback: (...args: any[]) => any = arguments[0]
-  let args: any[] | null =
+  const args: any[] | null =
     arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : null
 
   const callbackWithAsyncContext = bindSnapshot(
