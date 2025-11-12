@@ -154,6 +154,42 @@ it('only affects the task it is called in', async () => {
   ])
 })
 
+it('does not run immediates scheduled before it was called', async () => {
+  const { log, logs } = createLogger()
+  const done = createPromiseWithResolvers<void>()
+
+  setTimeout(() => {
+    log('timeout 1')
+
+    setImmediate(() => {
+      log('timeout 1 -> immediate 1 (slow)')
+      done.resolve()
+    })
+
+    runPendingImmediatesAfterCurrentTask()
+
+    setImmediate(() => {
+      log('timeout 1 -> immediate 2 (fast)')
+    })
+  })
+  setTimeout(() => {
+    log('timeout 2')
+  })
+
+  await done.promise
+
+  expect(logs).toEqual([
+    // ===================================
+    'timeout 1',
+    // ======================
+    'timeout 1 -> immediate 2 (fast)',
+    // ===================================
+    'timeout 2',
+    // ======================
+    'timeout 1 -> immediate 1 (slow)',
+  ])
+})
+
 it('runs immediates scheduled in nextTick', async () => {
   const { log, logs } = createLogger()
   const done = createPromiseWithResolvers<void>()
