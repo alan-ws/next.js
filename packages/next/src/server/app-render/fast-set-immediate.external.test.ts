@@ -68,6 +68,7 @@ it('runs immediates after each task', async () => {
       })
     })
   })
+
   setTimeout(() => {
     DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
 
@@ -79,9 +80,15 @@ it('runs immediates after each task', async () => {
       })
     })
   })
+
   setTimeout(() => {
     log('timeout 3')
-    done.resolve()
+    try {
+      expectNoPendingImmediates()
+      done.resolve()
+    } catch (err) {
+      done.reject(err)
+    }
   })
 
   await done.promise
@@ -126,15 +133,30 @@ it('only affects the task it is called in', async () => {
       })
     })
   })
+
   setTimeout(() => {
     log('timeout 2')
+    try {
+      expectNoPendingImmediates()
+      // resolved elsewhere
+    } catch (err) {
+      done.reject(err)
+    }
+
     setImmediate(() => {
       log('timeout 2 -> immediate 1 (slow)')
       done.resolve()
     })
   })
+
   setTimeout(() => {
     log('timeout 3')
+    try {
+      expectNoPendingImmediates()
+      // resolved elsewhere
+    } catch (err) {
+      done.reject(err)
+    }
   })
 
   await done.promise
@@ -173,8 +195,15 @@ it('does not run immediates scheduled before it was called', async () => {
       log('timeout 1 -> immediate 2 (fast)')
     })
   })
+
   setTimeout(() => {
     log('timeout 2')
+    try {
+      expectNoPendingImmediates()
+      // resolved elsewhere
+    } catch (err) {
+      done.reject(err)
+    }
   })
 
   await done.promise
@@ -212,9 +241,15 @@ it('runs immediates scheduled in nextTick', async () => {
       })
     })
   })
+
   setTimeout(() => {
     log('timeout 2')
-    done.resolve()
+    try {
+      expectNoPendingImmediates()
+      done.resolve()
+    } catch (err) {
+      done.reject(err)
+    }
   })
 
   await done.promise
@@ -255,9 +290,15 @@ it('runs ticks and microtasks from immediates before moving onto the next task',
       })
     })
   })
+
   setTimeout(() => {
     log('timeout 2')
-    done.resolve()
+    try {
+      expectNoPendingImmediates()
+      done.resolve()
+    } catch (err) {
+      done.reject(err)
+    }
   })
 
   await done.promise
@@ -293,9 +334,15 @@ describe('alternate sources of immediates', () => {
         log('timeout 1 -> immediate 1')
       })
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -324,9 +371,15 @@ describe('alternate sources of immediates', () => {
         log('timeout 1 -> immediate 1')
       })
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -356,9 +409,15 @@ describe('alternate sources of immediates', () => {
         log('timeout 1 -> immediate 1')
       })
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -399,10 +458,16 @@ describe('async context propagation', () => {
         })
       })
     })
+
     setTimeout(() => {
       // The context should not be readable here
       log(`timeout 2 :: ${Ctx.getStore()}`)
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -439,10 +504,16 @@ describe('async context propagation', () => {
         })
       })
     })
+
     setTimeout(() => {
       // The context should not be readable here
       log(`timeout 2 :: ${Ctx.getStore()}`)
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -476,9 +547,15 @@ describe('allows cancelling immediates', () => {
       })
       clearImmediate(immediate2)
     })
+
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -514,7 +591,12 @@ describe('allows cancelling immediates', () => {
     })
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -548,7 +630,12 @@ describe('allows cancelling immediates', () => {
     })
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -599,7 +686,12 @@ describe('allows cancelling immediates', () => {
     })
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
@@ -650,7 +742,12 @@ describe('allows cancelling immediates', () => {
     })
     setTimeout(() => {
       log('timeout 2')
-      done.resolve()
+      try {
+        expectNoPendingImmediates()
+        done.resolve()
+      } catch (err) {
+        done.reject(err)
+      }
     })
 
     await done.promise
