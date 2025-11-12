@@ -799,9 +799,15 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             }
         }
 
+        let ReadCellOptions {
+            is_transient_cell,
+            tracking,
+            final_read_hint,
+        } = options;
+
         let mut ctx = self.execute_context(turbo_tasks);
         let (mut task, reader_task) = if self.should_track_dependencies()
-            && !matches!(options.tracking, ReadTracking::Untracked)
+            && !matches!(tracking, ReadTracking::Untracked)
             && let Some(reader_id) = reader
             && reader_id != task_id
         {
@@ -814,16 +820,16 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             (ctx.task(task_id, TaskDataCategory::Data), None)
         };
 
-        let content = if options.final_read_hint {
-            remove!(task, CellData { cell })
-        } else if let Some(content) = get!(task, CellData { cell }) {
+        let content = if final_read_hint {
+            task.remove_cell_data(is_transient_cell, cell)
+        } else if let Some(content) = task.get_cell_data(is_transient_cell, cell) {
             let content = content.clone();
             Some(content)
         } else {
             None
         };
         if let Some(content) = content {
-            if options.tracking.should_track(false) {
+            if tracking.should_track(false) {
                 add_cell_dependency(task_id, task, reader, reader_task, cell);
             }
             return Ok(Ok(TypedCellContent(
@@ -850,7 +856,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         )
         .copied();
         let Some(max_id) = max_id else {
-            if options.tracking.should_track(true) {
+            if tracking.should_track(true) {
                 add_cell_dependency(task_id, task, reader, reader_task, cell);
             }
             bail!(
@@ -859,7 +865,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             );
         };
         if cell.index >= max_id {
-            if options.tracking.should_track(true) {
+            if tracking.should_track(true) {
                 add_cell_dependency(task_id, task, reader, reader_task, cell);
             }
             bail!(
@@ -1959,6 +1965,14 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
                             .get(&cell.type_id).is_none_or(|start_index| cell.index >= *start_index))
             }));
         }
+        if task_id.is_transient() || iter_many!(task, TransientCellData { cell }
+            if cell_counters.get(&cell.type_id).is_none_or(|start_index| cell.index >= *start_index) => cell
+        ).count() > 0 {
+            removed_data.extend(task.extract_if(CachedDataItemType::TransientCellData, |key, _| {
+                matches!(key, CachedDataItemKey::TransientCellData { cell } if cell_counters
+                            .get(&cell.type_id).is_none_or(|start_index| cell.index >= *start_index))
+            }));
+        }
 
         old_edges.extend(
             task.iter(CachedDataItemType::OutdatedCollectible)
@@ -2388,6 +2402,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
     fn task_execution_completed_cleanup(&self, ctx: &mut impl ExecuteContext<'_>, task_id: TaskId) {
         let mut task = ctx.task(task_id, TaskDataCategory::All);
         task.shrink_to_fit(CachedDataItemType::CellData);
+        task.shrink_to_fit(CachedDataItemType::TransientCellData);
         task.shrink_to_fit(CachedDataItemType::CellTypeMaxIndex);
         task.shrink_to_fit(CachedDataItemType::CellDependency);
         task.shrink_to_fit(CachedDataItemType::OutputDependency);
@@ -2523,12 +2538,12 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         &self,
         task_id: TaskId,
         cell: CellId,
-        _options: ReadCellOptions,
+        options: ReadCellOptions,
         turbo_tasks: &dyn TurboTasksBackendApi<TurboTasksBackend<B>>,
     ) -> Result<TypedCellContent> {
         let mut ctx = self.execute_context(turbo_tasks);
         let task = ctx.task(task_id, TaskDataCategory::Data);
-        if let Some(content) = get!(task, CellData { cell }) {
+        if let Some(content) = task.get_cell_data(options.is_transient_cell, cell) {
             Ok(CellContent(Some(content.reference.clone())).into_typed(cell.type_id))
         } else {
             Ok(CellContent(None).into_typed(cell.type_id))
@@ -2670,6 +2685,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         &self,
         task_id: TaskId,
         cell: CellId,
+        is_transient_cell: bool,
         content: CellContent,
         verification_mode: VerificationMode,
         turbo_tasks: &dyn TurboTasksBackendApi<TurboTasksBackend<B>>,
@@ -2678,6 +2694,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             task_id,
             cell,
             content,
+            is_transient_cell,
             verification_mode,
             self.execute_context(turbo_tasks),
         );
@@ -3265,12 +3282,19 @@ impl<B: BackingStorage> Backend for TurboTasksBackend<B> {
         &self,
         task_id: TaskId,
         cell: CellId,
+        is_transient_cell: bool,
         content: CellContent,
         verification_mode: VerificationMode,
         turbo_tasks: &dyn TurboTasksBackendApi<Self>,
     ) {
-        self.0
-            .update_task_cell(task_id, cell, content, verification_mode, turbo_tasks);
+        self.0.update_task_cell(
+            task_id,
+            cell,
+            is_transient_cell,
+            content,
+            verification_mode,
+            turbo_tasks,
+        );
     }
 
     fn mark_own_task_as_finished(
