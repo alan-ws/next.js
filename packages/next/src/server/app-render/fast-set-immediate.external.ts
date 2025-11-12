@@ -20,20 +20,27 @@ const originalClearImmediate = globalThis.clearImmediate
 const originalNextTick = process.nextTick
 
 export function install() {
-  const nodeTimers = require('node:timers') as typeof import('node:timers')
-  globalThis.setImmediate = nodeTimers.setImmediate =
-    // Workaround for missing __promisify__ which is not a real property
-    patchedSetImmediate as unknown as typeof setImmediate
-  globalThis.clearImmediate = nodeTimers.clearImmediate = patchedClearImmediate
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    throw new InvariantError(
+      'Fast setImmediate is not available in the edge runtime.'
+    )
+  } else {
+    const nodeTimers = require('node:timers') as typeof import('node:timers')
+    globalThis.setImmediate = nodeTimers.setImmediate =
+      // Workaround for missing __promisify__ which is not a real property
+      patchedSetImmediate as unknown as typeof setImmediate
+    globalThis.clearImmediate = nodeTimers.clearImmediate =
+      patchedClearImmediate
 
-  const nodeTimersPromises =
-    require('node:timers/promises') as typeof import('node:timers/promises')
-  nodeTimersPromises.setImmediate =
-    patchedSetImmediatePromise as typeof import('node:timers/promises').setImmediate
+    const nodeTimersPromises =
+      require('node:timers/promises') as typeof import('node:timers/promises')
+    nodeTimersPromises.setImmediate =
+      patchedSetImmediatePromise as typeof import('node:timers/promises').setImmediate
 
-  process.nextTick = patchedNextTick
+    process.nextTick = patchedNextTick
 
-  isInstalled = true
+    isInstalled = true
+  }
 }
 
 /**
@@ -485,15 +492,21 @@ const debug =
   process.env.NEXT_DEBUG_IMMEDIATES !== '1'
     ? undefined
     : (...args: any[]) => {
-        const { inspect } = require('node:util') as typeof import('node:util')
+        if (process.env.NEXT_RUNTIME === 'edge') {
+          throw new InvariantError(
+            'Fast setImmediate is not available in the edge runtime.'
+          )
+        } else {
+          const { inspect } = require('node:util') as typeof import('node:util')
 
-        let logLine =
-          args
-            .map((arg) =>
-              typeof arg === 'string' ? arg : inspect(arg, { colors: true })
-            )
-            .join(' ') + '\n'
+          let logLine =
+            args
+              .map((arg) =>
+                typeof arg === 'string' ? arg : inspect(arg, { colors: true })
+              )
+              .join(' ') + '\n'
 
-        logLine = '\x1B[2m' + logLine + '\x1B[22m' // styleText('dim', logLine)
-        process.stdout.write(logLine)
+          logLine = '\x1B[2m' + logLine + '\x1B[22m' // styleText('dim', logLine)
+          process.stdout.write(logLine)
+        }
       }

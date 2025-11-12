@@ -914,5 +914,6 @@
   "913": "performWork can only be called while waiting (state: %s)",
   "914": "Cannot stop capturing immediates before execution is finished (state: %s)",
   "915": "Expected all captured immediates to have been executed (state: %s)",
-  "916": "scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: %s)"
+  "916": "scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: %s)",
+  "917": "Fast setImmediate is not available in the edge runtime."
 }
