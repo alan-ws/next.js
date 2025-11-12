@@ -430,6 +430,17 @@ pub trait TaskGuard: Debug {
             )),
         }
     }
+    /// Returns (is_dirty, is_clean_in_current_session)
+    fn dirty(&self, session_id: SessionId) -> (bool, bool) {
+        match get!(self, Dirty) {
+            None => (false, false),
+            Some(Dirtyness::Dirty) => (true, false),
+            Some(Dirtyness::SessionDependent) => (
+                true,
+                get!(self, CleanInSession).copied() == Some(session_id),
+            ),
+        }
+    }
     fn dirty_containers(&self, session_id: SessionId) -> impl Iterator<Item = TaskId> {
         self.dirty_containers_with_count(session_id)
             .map(|(task_id, _)| task_id)
@@ -456,6 +467,18 @@ pub trait TaskGuard: Debug {
                 }
             },
         )
+    }
+    fn dirty_container_count(&self, session_id: SessionId) -> i32 {
+        let dirty_count = get!(self, AggregatedDirtyContainerCount)
+            .copied()
+            .unwrap_or_default();
+        let clean_count = get!(
+            self,
+            AggregatedSessionDependentCleanContainerCount { session_id }
+        )
+        .copied()
+        .unwrap_or_default();
+        dirty_count - clean_count
     }
 }
 
@@ -782,8 +805,8 @@ impl_operation!(AggregationUpdate aggregation_update::AggregationUpdateQueue);
 pub use self::invalidate::TaskDirtyCause;
 pub use self::{
     aggregation_update::{
-        AggregatedDataUpdate, AggregationUpdateJob, get_aggregation_number, get_uppers,
-        is_aggregating_node, is_root_node,
+        AggregatedDataUpdate, AggregationUpdateJob, ComputeDirtyAndCleanUpdate,
+        get_aggregation_number, get_uppers, is_aggregating_node, is_root_node,
     },
     cleanup_old_edges::OutdatedEdge,
     connect_children::connect_children,
