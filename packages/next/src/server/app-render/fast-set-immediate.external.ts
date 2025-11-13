@@ -130,17 +130,15 @@ function scheduleWorkAfterTicksAndMicrotasks() {
       `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[executionState]})`
     )
   }
-  originalNextTick(() => {
-    queueMicrotask(() => {
-      originalNextTick(() => {
-        if (pendingNextTicks > 0) {
-          // We have raw nextTicks. Let those run first.
-          debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
-          return scheduleWorkAfterTicksAndMicrotasks()
-        }
 
-        return performWork()
-      })
+  queueMicrotask(() => {
+    originalNextTick(() => {
+      if (pendingNextTicks > 0) {
+        // We have raw nextTicks. Let those run first.
+        debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
+        return scheduleWorkAfterTicksAndMicrotasks()
+      }
+      return performWork()
     })
   })
 }
