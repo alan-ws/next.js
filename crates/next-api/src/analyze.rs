@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{collections::HashSet, io::Write};
 
 use anyhow::Result;
 use byteorder::{BE, WriteBytesExt};
@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
-    FxIndexSet, NonLocalValue, ResolvedVc, TryFlatJoinIterExt, ValueToString, Vc,
+    FxIndexSet, NonLocalValue, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, ValueToString, Vc,
     trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{
@@ -81,6 +81,7 @@ pub struct AnalyzeChunkPart {
     pub source_index: u32,
     pub output_file_index: u32,
     pub size: u32,
+    pub is_polyfill: bool,
 }
 
 #[derive(Serialize)]
@@ -352,8 +353,18 @@ impl ModulesDataBuilder {
 }
 
 #[turbo_tasks::function]
-pub async fn analyze_output_assets(output_assets: Vc<OutputAssets>) -> Result<Vc<FileContent>> {
+pub async fn analyze_output_assets(
+    output_assets: Vc<OutputAssets>,
+    polyfill_assets: Vc<OutputAssets>,
+) -> Result<Vc<FileContent>> {
     let output_assets = all_assets_from_entries(output_assets);
+    let polyfill_assets_vec = polyfill_assets.await?;
+    let polyfill_paths_vec: Vec<_> = polyfill_assets_vec
+        .iter()
+        .map(|asset| asset.path().to_string().owned())
+        .try_join()
+        .await?;
+    let polyfill_paths: HashSet<_> = polyfill_paths_vec.iter().cloned().collect();
 
     let mut builder = AnalyzeDataBuilder::new();
 
@@ -367,7 +378,10 @@ pub async fn analyze_output_assets(output_assets: Vc<OutputAssets>) -> Result<Vc
             // Skip source maps.
             continue;
         }
-        let output_file_index = builder.add_output_file(AnalyzeOutputFile { filename });
+
+        let output_file_index = builder.add_output_file(AnalyzeOutputFile {
+            filename: filename.clone(),
+        });
         let chunk_parts = split_output_asset_into_parts(*asset).await?;
         for chunk_part in chunk_parts {
             let source_index = builder
@@ -377,6 +391,7 @@ pub async fn analyze_output_assets(output_assets: Vc<OutputAssets>) -> Result<Vc
                 source_index,
                 output_file_index,
                 size: chunk_part.real_size + chunk_part.unaccounted_size,
+                is_polyfill: polyfill_paths.contains(&filename),
             });
             builder.add_chunk_part_to_output_file(output_file_index, chunk_part_index);
             builder.add_chunk_part_to_source(source_index, chunk_part_index);
@@ -534,8 +549,15 @@ pub async fn analyze_module_graphs(module_graphs: Vc<ModuleGraphs>) -> Result<Vc
 
 #[turbo_tasks::function]
 pub async fn analyze_endpoint(endpoint: Vc<Box<dyn Endpoint>>) -> Result<Vc<FileContent>> {
+    let polyfill_asset = *endpoint.polyfill_asset().await?;
+    let polyfill_assets = if let Some(asset) = polyfill_asset {
+        Vc::cell(vec![asset])
+    } else {
+        Vc::cell(vec![])
+    };
     Ok(analyze_output_assets(
         *endpoint.output().await?.output_assets,
+        polyfill_assets,
     ))
 }
 
@@ -543,15 +565,21 @@ pub async fn analyze_endpoint(endpoint: Vc<Box<dyn Endpoint>>) -> Result<Vc<File
 pub struct AnalyzeDataOutputAsset {
     pub path: FileSystemPath,
     pub output_assets: ResolvedVc<OutputAssets>,
+    pub polyfill_assets: ResolvedVc<OutputAssets>,
 }
 
 #[turbo_tasks::value_impl]
 impl AnalyzeDataOutputAsset {
     #[turbo_tasks::function]
-    pub async fn new(path: FileSystemPath, output_assets: Vc<OutputAssets>) -> Result<Vc<Self>> {
+    pub async fn new(
+        path: FileSystemPath,
+        output_assets: Vc<OutputAssets>,
+        polyfill_assets: Vc<OutputAssets>,
+    ) -> Result<Vc<Self>> {
         Ok(Self {
             path,
             output_assets: output_assets.to_resolved().await?,
+            polyfill_assets: polyfill_assets.to_resolved().await?,
         }
         .cell())
     }
@@ -561,7 +589,7 @@ impl AnalyzeDataOutputAsset {
 impl Asset for AnalyzeDataOutputAsset {
     #[turbo_tasks::function]
     fn content(&self) -> Vc<AssetContent> {
-        let file_content = analyze_output_assets(*self.output_assets);
+        let file_content = analyze_output_assets(*self.output_assets, *self.polyfill_assets);
         AssetContent::file(file_content)
     }
 }

@@ -62,7 +62,7 @@ use turbopack_core::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
         chunk_group_info::{ChunkGroup, ChunkGroupEntry},
     },
-    output::{OutputAsset, OutputAssets, OutputAssetsWithReferenced},
+    output::{OptionOutputAsset, OutputAsset, OutputAssets, OutputAssetsWithReferenced},
     raw_output::RawOutput,
     reference_type::{CommonJsReferenceSubType, CssReferenceSubType, ReferenceType},
     resolve::{origin::PlainResolveOrigin, parse::Request, pattern::Pattern},
@@ -1317,26 +1317,10 @@ impl AppEndpoint {
 
         let manifest_path_prefix = &app_entry.original_name;
 
-        // polyfill-nomodule.js is a pre-compiled asset distributed as part of next,
-        // load it as a RawModule.
-        let next_package = get_next_package(project.project_path().owned().await?).await?;
-        let polyfill_source =
-            FileSource::new(next_package.join("dist/build/polyfills/polyfill-nomodule.js")?);
-        let polyfill_output_path = client_chunking_context
-            .chunk_path(
-                Some(Vc::upcast(polyfill_source)),
-                polyfill_source.ident(),
-                None,
-                rcstr!(".js"),
-            )
-            .owned()
-            .await?;
-        let polyfill_output_asset = ResolvedVc::upcast(
-            RawOutput::new(polyfill_output_path, Vc::upcast(polyfill_source))
-                .to_resolved()
-                .await?,
-        );
-        client_assets.insert(polyfill_output_asset);
+        let polyfill_output_asset = *self.polyfill_output_asset(*this.app_project).await?;
+        if let Some(polyfill_output_asset) = polyfill_output_asset.as_ref() {
+            client_assets.insert(*polyfill_output_asset);
+        }
 
         if emit_manifests != EmitManifests::None {
             if *this
@@ -1371,7 +1355,7 @@ impl AppEndpoint {
                 client_relative_path: client_relative_path.clone(),
                 pages: Default::default(),
                 root_main_files: client_shared_chunks,
-                polyfill_files: vec![polyfill_output_asset],
+                polyfill_files: polyfill_output_asset.map(|a| vec![a]).unwrap_or_default(),
             };
             server_assets.insert(ResolvedVc::upcast(build_manifest.resolved_cell()));
         }
@@ -2119,6 +2103,46 @@ impl Endpoint for AppEndpoint {
             )
             .await?;
         Ok(Vc::cell(vec![module_graphs.full]))
+    }
+
+    #[turbo_tasks::function]
+    async fn polyfill_asset(self: Vc<Self>) -> Result<Vc<OptionOutputAsset>> {
+        let this = self.await?;
+        Ok(self.polyfill_output_asset(*this.app_project))
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl AppEndpoint {
+    #[turbo_tasks::function]
+    async fn polyfill_output_asset(
+        self: Vc<Self>,
+        app_project: ResolvedVc<AppProject>,
+    ) -> Result<Vc<OptionOutputAsset>> {
+        let project = app_project.project();
+        let client_chunking_context = project.client_chunking_context().to_resolved().await?;
+
+        // polyfill-nomodule.js is a pre-compiled asset distributed as part of next,
+        // load it as a RawModule.
+        let next_package = get_next_package(project.project_path().owned().await?).await?;
+        let polyfill_source =
+            FileSource::new(next_package.join("dist/build/polyfills/polyfill-nomodule.js")?);
+        let polyfill_output_path = client_chunking_context
+            .chunk_path(
+                Some(Vc::upcast(polyfill_source)),
+                polyfill_source.ident(),
+                None,
+                rcstr!(".js"),
+            )
+            .owned()
+            .await?;
+        let polyfill_output_asset = ResolvedVc::upcast(
+            RawOutput::new(polyfill_output_path, Vc::upcast(polyfill_source))
+                .to_resolved()
+                .await?,
+        );
+
+        Ok(Vc::cell(Some(polyfill_output_asset)))
     }
 }
 

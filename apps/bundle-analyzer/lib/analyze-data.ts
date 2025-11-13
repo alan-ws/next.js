@@ -14,6 +14,7 @@ export interface AnalyzeChunkPart {
   source_index: number
   output_file_index: number
   size: number
+  is_polyfill: boolean
 }
 
 export interface AnalyzeOutputFile {
@@ -386,6 +387,17 @@ export class AnalyzeData {
     }
 
     return { client, server, traced, js, css, json, asset }
+  }
+
+  isPolyfillSource(index: number): boolean {
+    const chunkParts = this.sourceChunkParts(index)
+    for (const chunkPartIndex of chunkParts) {
+      const chunkPart = this.chunkPart(chunkPartIndex)
+      if (chunkPart?.is_polyfill) {
+        return true
+      }
+    }
+    return false
   }
 
   // Get the raw header for debugging

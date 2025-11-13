@@ -73,11 +73,13 @@ async fn get_analyze_data_operation(
         .iter()
         .map(|(key, endpoint_group)| async move {
             let output_assets = endpoint_group.output_assets();
+            let polyfill_assets = endpoint_group.polyfill_assets();
             let analyze_data = AnalyzeDataOutputAsset::new(
                 analyze_output_root
                     .join(&key.to_string())?
                     .join("analyze.data")?,
                 output_assets,
+                polyfill_assets,
             )
             .to_resolved()
             .await?;

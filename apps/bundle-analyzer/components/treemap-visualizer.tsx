@@ -23,6 +23,7 @@ interface TreemapVisualizerProps {
   onHoveredNodeChangeDelayed?: (nodeInfo: LayoutNodeInfo | null) => void
   searchQuery?: string
   filterSource?: (sourceIndex: number) => boolean
+  isPolyfillChunk?: (sourceIndex: number) => boolean
 }
 
 function getFileColor(node: {
@@ -184,6 +185,7 @@ function drawTreemap(
   searchQuery: string,
   originalData: LayoutNode,
   immediateHoveredSourceIndex: number | undefined,
+  isPolyfillChunk: (sourceIndex: number) => boolean,
   currentPath: string[] = [],
   parentFadedOut = false,
   insideActiveSubtree = false
@@ -241,6 +243,7 @@ function drawTreemap(
             searchQuery,
             originalData,
             immediateHoveredSourceIndex,
+            isPolyfillChunk,
             path,
             parentFadedOut,
             insideActiveSubtree
@@ -305,6 +308,11 @@ function drawTreemap(
 
   if (type === 'file') {
     let color = getFileColor(node)
+
+    // Lighten polyfill files
+    if (sourceIndex !== undefined && isPolyfillChunk(sourceIndex)) {
+      color = lighten(0.4, color)
+    }
 
     // Apply brightness boost to immediately hovered node
     if (isImmediateHovered) {
@@ -467,6 +475,7 @@ function drawTreemap(
           searchQuery,
           originalData,
           immediateHoveredSourceIndex,
+          isPolyfillChunk,
           path,
           childFadeOut,
           childInsideActiveSubtree
@@ -556,6 +565,7 @@ export function TreemapVisualizer({
   onHoveredNodeChangeDelayed,
   searchQuery = '',
   filterSource,
+  isPolyfillChunk = () => false,
 }: TreemapVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -707,7 +717,8 @@ export function TreemapVisualizer({
       focusedAncestorChain,
       searchQuery,
       layout,
-      hoveredNode?.sourceIndex
+      hoveredNode?.sourceIndex,
+      isPolyfillChunk
     )
   }, [
     layout,
@@ -719,6 +730,7 @@ export function TreemapVisualizer({
     focusedAncestorChain,
     searchQuery,
     hoveredNode,
+    isPolyfillChunk,
   ])
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

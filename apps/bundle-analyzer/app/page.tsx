@@ -119,6 +119,14 @@ export default function Home() {
     }
   }, [analyzeData, environmentFilter, typeFilter])
 
+  const isPolyfillChunk = useMemo(() => {
+    if (!analyzeData) return () => false
+
+    return (sourceIndex: number) => {
+      return analyzeData.isPolyfillSource(sourceIndex)
+    }
+  }, [analyzeData])
+
   const handleMouseDown = () => {
     setIsResizing(true)
   }
@@ -267,6 +275,7 @@ export default function Home() {
                 onHoveredNodeChange={setHoveredNodeInfo}
                 searchQuery={searchQuery}
                 filterSource={filterSource}
+                isPolyfillChunk={isPolyfillChunk}
               />
             </div>
 
@@ -289,12 +298,31 @@ export default function Home() {
                 {selectedSourceIndex != null &&
                   analyzeData.source(selectedSourceIndex) && (
                     <>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Output Size:{' '}
-                        {formatBytes(
-                          analyzeData.getSourceOutputSize(selectedSourceIndex)
+                      <dl className="space-y-2">
+                        <div>
+                          <dt className="text-xs text-muted-foreground inline">
+                            Output Size:{' '}
+                          </dt>
+                          <dd className="text-xs text-muted-foreground inline">
+                            {formatBytes(
+                              analyzeData.getSourceOutputSize(
+                                selectedSourceIndex
+                              )
+                            )}
+                          </dd>
+                        </div>
+                        {isPolyfillChunk(selectedSourceIndex) && (
+                          <div>
+                            <dt className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/30 px-2 py-1 text-xs font-medium text-purple-700 dark:text-purple-300 ring-1 ring-inset ring-purple-700/10 dark:ring-purple-300/20">
+                              Polyfill
+                            </dt>
+                            <dd className="text-xs text-muted-foreground inline ml-2">
+                              Modules in polyfill chunks are only sent to legacy
+                              browsers.
+                            </dd>
+                          </div>
                         )}
-                      </p>
+                      </dl>
                       {modulesData && (
                         <ImportChain
                           key={selectedSourceIndex}

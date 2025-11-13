@@ -9,7 +9,7 @@ use turbo_tasks::{
 };
 use turbopack_core::{
     module_graph::{GraphEntries, ModuleGraph},
-    output::OutputAssets,
+    output::{OptionOutputAsset, OutputAsset, OutputAssets},
 };
 
 use crate::{operation::OptionEndpoint, paths::ServerPath, project::Project};
@@ -72,6 +72,10 @@ pub trait Endpoint {
     }
     #[turbo_tasks::function]
     fn module_graphs(self: Vc<Self>) -> Vc<ModuleGraphs>;
+    #[turbo_tasks::function]
+    fn polyfill_asset(self: Vc<Self>) -> Vc<OptionOutputAsset> {
+        Vc::cell(None)
+    }
 }
 
 #[derive(
@@ -140,6 +144,10 @@ impl EndpointGroup {
     pub fn module_graphs(&self) -> Vc<ModuleGraphs> {
         module_graphs_of_endpoints(self.primary.iter().map(|endpoint| **endpoint).collect())
     }
+
+    pub fn polyfill_assets(&self) -> Vc<OutputAssets> {
+        polyfill_assets_of_endpoints(self.primary.iter().map(|endpoint| **endpoint).collect())
+    }
 }
 
 #[turbo_tasks::function]
@@ -167,6 +175,22 @@ async fn module_graphs_of_endpoints(
         .into_iter()
         .collect::<Vec<_>>();
     Ok(Vc::cell(module_graphs))
+}
+
+#[turbo_tasks::function]
+async fn polyfill_assets_of_endpoints(
+    endpoints: Vec<Vc<Box<dyn Endpoint>>>,
+) -> Result<Vc<OutputAssets>> {
+    let assets: Vec<_> = endpoints
+        .iter()
+        .map(async |endpoint| endpoint.polyfill_asset().await)
+        .try_join()
+        .await?;
+    let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = assets
+        .into_iter()
+        .filter_map(|option_asset| *option_asset)
+        .collect();
+    Ok(Vc::cell(assets))
 }
 
 #[turbo_tasks::value(transparent)]
