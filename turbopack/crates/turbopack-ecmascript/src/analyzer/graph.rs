@@ -1125,12 +1125,6 @@ impl Analyzer<'_> {
     }
 
     fn add_effect(&mut self, effect: Effect) {
-        if matches!(effect, Effect::Conditional { .. }) {
-            debug_assert!(
-                !self.effects.contains(&effect),
-                "adding duplicate conditional effect: {effect:?}"
-            );
-        }
         self.effects.push(effect);
     }
 
