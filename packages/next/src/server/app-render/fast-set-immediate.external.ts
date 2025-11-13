@@ -49,7 +49,7 @@ export function install() {
  *
  * Starts capturing calls to `setImmediate` to run them as "fast immediates".
  * All calls captured in this way will be executed after the current task
- * (after ticks from `process.nextTick()` and microtasks scheduled from ticks).
+ * (after callbacks from `process.nextTick()`, microtasks, and nextTicks scheduled from microtasks).
  * This function needs to be called again in each task that needs the
  * "fast immediates" behavior.
  *
@@ -77,7 +77,7 @@ export function install() {
  *   })
  * })
  * setTimeout(() => {
- *   console.log("timeout 1")
+ *   console.log("timeout 2")
  * })
  * ```
  * will print
@@ -88,12 +88,17 @@ export function install() {
  * timeout 2
  * ```
  *
- * instead of the normal order
+ * instead of the usual order
  * ```
  * timeout 1
  * timeout 2
  * immediate!!!
  * ```
+ * > **NOTE**
+ * > The above is *most common* order, but it's not guaranteed.
+ * > Under some circumstances (e.g. when the event loop is blocked on CPU work),
+ * > Node will reorder things and run the immediate before timeout 2.
+ * > So, in a sense, we're just making this reordering happen consistently.
  *
  * Recursive `setImmediate` calls will also be executed as "fast immediates".
  * If multiple immediates were scheduled, `process.nextTick()` (and associated microtasks)
@@ -102,9 +107,16 @@ export function install() {
  * */
 export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
   startCapturingImmediates()
-  scheduleWorkAfterTicksAndMicrotasks()
+  scheduleWorkAfterNextTicksAndMicrotasks()
 }
 
+/**
+ * This should always be called a task after `DANGEROUSLY_runPendingImmediatesAfterCurrentTask`
+ * to make sure that everything executed as expected and we're not left in an inconsistent state.
+ * Ideally, this wouldn't be necessary, but we're not in control of the event loop
+ * and need to guard against unexpected behaviors not forseen in this implementation,
+ * so we have to be defensive.
+ */
 export function expectNoPendingImmediates() {
   if (executionState !== ExecutionState.None) {
     const prevExecutionState = executionState
@@ -124,25 +136,51 @@ export function expectNoPendingImmediates() {
   }
 }
 
-function scheduleWorkAfterTicksAndMicrotasks() {
+/**
+ * Wait until all nextTicks and microtasks spawned from the current task are done,
+ * then execute any immediates that they queued.
+ * */
+function scheduleWorkAfterNextTicksAndMicrotasks() {
   if (executionState !== ExecutionState.Waiting) {
     throw new InvariantError(
       `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[executionState]})`
     )
   }
 
+  // We want to execute "fast immediates" after all the nextTicks and microtasks
+  // spawned from the current task are done.
+  // The ordering here is:
+  //
+  // 1. sync code
+  // 2. process.nextTick (scheduled from sync code, or from one of these nextTicks)
+  // 3. microtasks
+  // 4. process.nextTick (scheduled from microtasks, e.g. `queueMicrotask(() => process.nextTick(callback))`)
+  //
+  // We want to run to run in step 4, because that's the latest point before the next tick.
+  // However, there might also be other callbacks scheduled to run in that step.
+  // But importantly, they had to be scheduled using a `process.nextTick`,
+  // so we can detect them by checking if `pendingNextTicks > 0`.
+  // In that case, we'll just reschedule ourselves in the same way again to let them run first.
+  // (this process can theoretically repeat multiple times, hence the recursion)
+
   queueMicrotask(() => {
+    // (note that this call won't increment `pendingNextTicks`,
+    // only the patched `process.nextTick` does that, so this won't loop infinitely)
     originalNextTick(() => {
       if (pendingNextTicks > 0) {
-        // We have raw nextTicks. Let those run first.
+        // More nextTicks were scheduled while the microtask queue ran. Let those run first, then try again.
         debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
-        return scheduleWorkAfterTicksAndMicrotasks()
+        return scheduleWorkAfterNextTicksAndMicrotasks()
       }
+
+      // There's no other nextTicks, we're the last one, so we're at the end of the task.
+      // Now, we can try and execute any queued immediates.
       return performWork()
     })
   })
 }
 
+/** Execute one immediate, and schedule a check for more (in case there's others in the queue) */
 function performWork() {
   debug?.(`scheduler :: performing work`)
 
@@ -211,10 +249,10 @@ function performWork() {
   executionState = ExecutionState.Waiting
 
   // schedule the loop again in case there's more immediates after this.
-  // if this is the last immediate, this also ensures that [ticks and microtasks
+  // if this is the last immediate, this also ensures that [nextTicks and microtasks
   // spawned from the current immediate] are executed before we let the event loop
   // move on to the next task.
-  scheduleWorkAfterTicksAndMicrotasks()
+  scheduleWorkAfterNextTicksAndMicrotasks()
 }
 
 function startCapturingImmediates() {
@@ -237,7 +275,7 @@ function stopCapturingImmediates() {
   }
 
   // This check enforces that we run performWork at least once before stopping
-  // to make sure that we've waited for all the ticks and microtasks
+  // to make sure that we've waited for all the nextTicks and microtasks
   // that might've scheduled some immediates after sync code.
   if (executionState !== ExecutionState.Working) {
     throw new InvariantError(
@@ -325,7 +363,7 @@ function safelyRunNextTickCallback(
     // of nextTick, because we'll use it to run immediates.
     // Sync errors in a nextTick trigger 'uncaughtException'
     // but, bizarrely, also sometimes make subsequent timeouts run
-    // before any other ticks, which subverts the ordering we want.
+    // before any other nextTicks, which subverts the ordering we want.
     // As an ugly workaround, we rethrow the error in a microtask,
     // which still triggers 'uncaughtException' but doesn't seem to have
     // the same ordering problem.
