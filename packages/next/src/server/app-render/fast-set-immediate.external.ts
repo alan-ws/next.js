@@ -191,16 +191,9 @@ function performWork() {
   }
   executionState = ExecutionState.Working
 
-  // Find the first (if any) queued immediate that wasn't cleared
-  let queueItem: ActiveQueueItem | null = null
-  while (queuedImmediates.length) {
-    const maybeQueItem = queuedImmediates.shift()!
-    if (!maybeQueItem.isCleared) {
-      queueItem = maybeQueItem
-      break
-    }
-  }
-  if (!queueItem) {
+  const queueItem = takeNextActiveQueueItem()
+
+  if (queueItem === null) {
     debug?.(`scheduler :: no immediates queued, exiting`)
     stopCapturingImmediates()
     return
@@ -253,6 +246,46 @@ function performWork() {
   // spawned from the current immediate] are executed before we let the event loop
   // move on to the next task.
   scheduleWorkAfterNextTicksAndMicrotasks()
+}
+
+function takeNextActiveQueueItem(): ActiveQueueItem | null {
+  // Find the first (if any) queued immediate that wasn't cleared.
+  // We don't remove immediates from the array when they're cleared,
+  // so this requires some legwork to exclude (and possibly drop) cleared items.
+
+  let firstActiveItem: ActiveQueueItem | null = null
+  let firstActiveItemIndex = -1
+  for (let i = 0; i < queuedImmediates.length; i++) {
+    const item = queuedImmediates[i]
+    if (!item.isCleared) {
+      firstActiveItem = item
+      firstActiveItemIndex = i
+      break
+    }
+  }
+
+  if (firstActiveItem === null) {
+    // We didn't find an active item.
+
+    // If the queue isn't empty, then it must only contain cleared items. Empty it.
+    if (queuedImmediates.length > 0) {
+      queuedImmediates.length = 0
+    }
+
+    return null
+  }
+
+  // Remove all items up to and including `nextActiveItemIndex` from the queue.
+  // (if it's not the first item, then it must be preceded by cleared items, which we want to drop anyway)
+  if (firstActiveItemIndex === 0) {
+    // Fast path - drop the first item
+    // (`splice` creates a result array for the removed items, so this is more efficient)
+    queuedImmediates.shift()
+  } else {
+    queuedImmediates.splice(0, firstActiveItemIndex + 1)
+  }
+
+  return firstActiveItem
 }
 
 function startCapturingImmediates() {
