@@ -29,12 +29,12 @@ interface ErrorsProps extends ErrorBaseProps {
   onClose: () => void
 }
 
-function isNextjsLink(text: string): boolean {
-  return text.startsWith('https://nextjs.org')
+function isLink(text: string): boolean {
+  return text.startsWith('https://') || text.startsWith('http://')
 }
 
 function HydrationErrorDescription({ message }: { message: string }) {
-  return <HotlinkedText text={message} matcher={isNextjsLink} />
+  return <HotlinkedText text={message} matcher={isLink} />
 }
 
 function GenericErrorDescription({ error }: { error: Error }) {
@@ -51,7 +51,7 @@ function GenericErrorDescription({ error }: { error: Error }) {
 
   return (
     <>
-      <HotlinkedText text={message} matcher={isNextjsLink} />
+      <HotlinkedText text={message} matcher={isLink} />
     </>
   )
 }
