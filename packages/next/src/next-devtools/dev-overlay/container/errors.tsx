@@ -29,8 +29,14 @@ interface ErrorsProps extends ErrorBaseProps {
   onClose: () => void
 }
 
-function isLink(text: string): boolean {
-  return text.startsWith('https://') || text.startsWith('http://')
+function isLink(text: string): string | null {
+  if (text.startsWith('https://nextjs.org')) {
+    return 'nextjs-link'
+  }
+  if (text.startsWith('https://') || text.startsWith('http://')) {
+    return 'external-link'
+  }
+  return null
 }
 
 function HydrationErrorDescription({ message }: { message: string }) {
@@ -411,5 +417,8 @@ export const styles = `
     padding: 14px;
     border-radius: var(--rounded-md-2);
     border: 1px solid var(--color-gray-alpha-400);
+  }
+  .external-link, .external-link:hover {
+    color:inherit;
   }
 `
