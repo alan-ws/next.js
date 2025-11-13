@@ -116,7 +116,25 @@ export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
   }
 
   const execution = startCapturingImmediates()
-  scheduleWorkAfterNextTicksAndMicrotasks(execution)
+
+  try {
+    scheduleWorkAfterNextTicksAndMicrotasks(execution)
+  } catch (err) {
+    // If this error comes from a bail() call, rethrow it.
+    if (execution.state === ExecutionState.Abandoned) {
+      throw err
+    }
+    // Otherwise, bail out here.
+    bail(
+      execution,
+      new InvariantError(
+        'An unexpected error occurred while starting to capture immediates',
+        {
+          cause: err,
+        }
+      )
+    )
+  }
 }
 
 /**
@@ -147,11 +165,8 @@ export function expectNoPendingImmediates() {
  * */
 function scheduleWorkAfterNextTicksAndMicrotasks(execution: Execution) {
   if (execution.state !== ExecutionState.Waiting) {
-    bail(
-      execution,
-      new InvariantError(
-        `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[execution.state]})`
-      )
+    throw new InvariantError(
+      `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[execution.state]})`
     )
   }
 
@@ -175,22 +190,22 @@ function scheduleWorkAfterNextTicksAndMicrotasks(execution: Execution) {
     // (note that this call won't increment `pendingNextTicks`,
     // only the patched `process.nextTick` does that, so this won't loop infinitely)
     originalNextTick(() => {
-      if (
-        execution.state === ExecutionState.Abandoned ||
-        currentExecution !== execution
-      ) {
-        debug?.(`scheduler :: the execution was abandoned`)
-        return
-      }
-      if (pendingNextTicks > 0) {
-        // More nextTicks were scheduled while the microtask queue ran. Let those run first, then try again.
-        debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
-        return scheduleWorkAfterNextTicksAndMicrotasks(execution)
-      }
-
-      // There's no other nextTicks, we're the last one, so we're at the end of the task.
-      // Now, we can try and execute any queued immediates.
       try {
+        if (
+          execution.state === ExecutionState.Abandoned ||
+          currentExecution !== execution
+        ) {
+          debug?.(`scheduler :: the execution was abandoned`)
+          return
+        }
+        if (pendingNextTicks > 0) {
+          // More nextTicks were scheduled while the microtask queue ran. Let those run first, then try again.
+          debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
+          return scheduleWorkAfterNextTicksAndMicrotasks(execution)
+        }
+
+        // There's no other nextTicks, we're the last one, so we're at the end of the task.
+        // Now, we can try and execute any queued immediates.
         return performWork(execution)
       } catch (err) {
         // If this error comes from a bail() call, rethrow it.
@@ -227,11 +242,8 @@ function performWork(execution: Execution) {
   debug?.(`scheduler :: performing work`)
 
   if (execution.state !== ExecutionState.Waiting) {
-    bail(
-      execution,
-      new InvariantError(
-        `performWork can only be called while waiting (state: ${ExecutionState[execution.state]})`
-      )
+    throw new InvariantError(
+      `performWork can only be called while waiting (state: ${ExecutionState[execution.state]})`
     )
   }
   execution.state = ExecutionState.Working
@@ -363,11 +375,8 @@ function stopCapturingImmediates(execution: Execution) {
   // to make sure that we've waited for all the nextTicks and microtasks
   // that might've scheduled some immediates after sync code.
   if (execution.state !== ExecutionState.Working) {
-    bail(
-      execution,
-      new InvariantError(
-        `Cannot stop capturing immediates before execution is finished (state: ${ExecutionState[execution.state]})`
-      )
+    throw new InvariantError(
+      `Cannot stop capturing immediates before execution is finished (state: ${ExecutionState[execution.state]})`
     )
   }
 

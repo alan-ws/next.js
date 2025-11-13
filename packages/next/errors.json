@@ -916,5 +916,6 @@
   "915": "Expected all captured immediates to have been executed (state: %s)",
   "916": "scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: %s)",
   "917": "Fast setImmediate is not available in the edge runtime.",
-  "918": "An unexpected error occurred while executing immediates"
+  "918": "An unexpected error occurred while executing immediates",
+  "919": "An unexpected error occurred while starting to capture immediates"
 }
