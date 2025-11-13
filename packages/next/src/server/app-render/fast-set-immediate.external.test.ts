@@ -1059,3 +1059,209 @@ describe('uncaught errors in setImmediate do not affect surrounding tasks or oth
     ])
   })
 })
+
+describe('error recovery', () => {
+  describe('when crashing, it bails out to native setImmediate and does not break subsequent calls', () => {
+    const expectCorrectRunToWork = async () => {
+      const { log, logs } = createLogger()
+      const done = createPromiseWithResolvers<void>()
+
+      setTimeout(() => {
+        try {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+        } catch (err) {
+          return done.reject(err)
+        }
+
+        log('timeout 1')
+
+        setImmediate(() => {
+          log('timeout 1 -> immediate 1')
+        })
+        setImmediate(() => {
+          log('timeout 1 -> immediate 2')
+        })
+      })
+
+      setTimeout(() => {
+        log('timeout 2')
+
+        try {
+          expectNoPendingImmediates()
+          done.resolve()
+        } catch (err) {
+          done.reject(err)
+        }
+      })
+
+      await done.promise
+
+      expect(logs).toEqual([
+        'timeout 1',
+        'timeout 1 -> immediate 1',
+        'timeout 1 -> immediate 2',
+        'timeout 2',
+      ])
+    }
+
+    const schedulingCases = [
+      {
+        description: 'in sync code',
+        scheduleCrash: (cb: () => void) => {
+          cb()
+        },
+      },
+      {
+        description: 'in nextTick',
+        scheduleCrash: (cb: () => void) => {
+          process.nextTick(() => {
+            cb()
+          })
+        },
+      },
+      {
+        description: 'in microtask',
+        scheduleCrash: (cb: () => void) => {
+          queueMicrotask(() => {
+            cb()
+          })
+        },
+      },
+      {
+        description: 'after microtasks',
+        scheduleCrash: (cb: () => void) => {
+          queueMicrotask(() => {
+            process.nextTick(() => {
+              cb()
+            })
+          })
+        },
+      },
+    ]
+
+    describe.each([
+      {
+        description: 'starting capture twice in the same task',
+        invalidCall: () => {
+          DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+        },
+      },
+      {
+        description: 'expectNoPendingImmediates in the same task as capture',
+        invalidCall: () => {
+          expectNoPendingImmediates()
+        },
+      },
+    ])('crash reason - $description', ({ invalidCall }) => {
+      it.each(schedulingCases)(
+        'after a crash - $description',
+        async ({ scheduleCrash }) => {
+          // In the first run, we trigger a crash
+
+          const { log, logs } = createLogger()
+          const dones = [
+            createPromiseWithResolvers<void>(),
+            createPromiseWithResolvers<void>(),
+            createPromiseWithResolvers<void>(),
+          ]
+
+          setTimeout(() => {
+            setImmediate(() => {
+              log('immediate 1 (native)')
+              dones[0].resolve()
+            })
+          })
+          setTimeout(() => {
+            DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+            log('timeout 1')
+
+            setImmediate(() => {
+              log('timeout 1 -> immediate 1 (patched)')
+              dones[1].resolve()
+            })
+
+            setImmediate(() => {
+              log('timeout 1 -> immediate 2 (patched)')
+              dones[2].resolve()
+            })
+
+            scheduleCrash(() => {
+              expect(() => invalidCall()).toThrow()
+            })
+          })
+
+          await Promise.all(dones.map((d) => d.promise))
+
+          expect(logs).toEqual([
+            'timeout 1',
+            // The queued immediates should be rescheduled using native `setImmediate`,
+            // so we should observe them happening after the native one we scheduled earlier
+            'immediate 1 (native)',
+            'timeout 1 -> immediate 1 (patched)',
+            'timeout 1 -> immediate 2 (patched)',
+          ])
+
+          // The next run should work correctly
+          await expectCorrectRunToWork()
+        }
+      )
+
+      it.each(schedulingCases)(
+        'after a crash in a patched immediate - $description',
+        async ({ scheduleCrash }) => {
+          // In the first run, we trigger a crash
+
+          const { log, logs } = createLogger()
+          const dones = [
+            createPromiseWithResolvers<void>(),
+            createPromiseWithResolvers<void>(),
+            createPromiseWithResolvers<void>(),
+          ]
+
+          setTimeout(() => {
+            setImmediate(() => {
+              log('immediate 1 (native)')
+              dones[0].resolve()
+            })
+          })
+          setTimeout(() => {
+            DANGEROUSLY_runPendingImmediatesAfterCurrentTask()
+            log('timeout 1')
+
+            setImmediate(() => {
+              log('timeout 1 -> immediate 1 (patched)')
+              dones[1].resolve()
+            })
+
+            setImmediate(() => {
+              log('timeout 1 -> immediate 2 (patched)')
+              scheduleCrash(() => {
+                expect(() => expectNoPendingImmediates()).toThrow()
+              })
+            })
+
+            setImmediate(() => {
+              log('timeout 1 -> immediate 3 (patched)')
+              dones[2].resolve()
+            })
+          })
+
+          await Promise.all(dones.map((d) => d.promise))
+
+          expect(logs).toEqual([
+            'timeout 1',
+            'timeout 1 -> immediate 1 (patched)',
+            'timeout 1 -> immediate 2 (patched)',
+            // The remaining queued immediate should be rescheduled using native `setImmediate`,
+            // so we should observe it happening after the native one we scheduled earlier
+            'immediate 1 (native)',
+            'timeout 1 -> immediate 3 (patched)',
+          ])
+
+          // The next run should work correctly
+          await expectCorrectRunToWork()
+        }
+      )
+    })
+  })
+})

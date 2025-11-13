@@ -2,18 +2,23 @@ import { promisify } from 'node:util'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import { bindSnapshot } from './async-local-storage'
 
+type Execution = {
+  state: ExecutionState
+  queuedImmediates: QueueItem[]
+}
+
 enum ExecutionState {
-  None = 1,
-  Waiting = 2,
-  Working = 3,
+  Waiting = 1,
+  Working = 2,
+  Finished = 3,
+  Abandoned = 4,
 }
 
 let isInstalled = false
 let wasEnabledAtLeastOnce = false
 
-const queuedImmediates: QueueItem[] = []
 let pendingNextTicks = 0
-let executionState: ExecutionState = ExecutionState.None
+let currentExecution: Execution | null = null
 
 const originalSetImmediate = globalThis.setImmediate
 const originalClearImmediate = globalThis.clearImmediate
@@ -106,8 +111,12 @@ export function install() {
  * See the unit tests for more examples.
  * */
 export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
-  startCapturingImmediates()
-  scheduleWorkAfterNextTicksAndMicrotasks()
+  if (!isInstalled) {
+    throw new InvariantError('install() was not called')
+  }
+
+  const execution = startCapturingImmediates()
+  scheduleWorkAfterNextTicksAndMicrotasks(execution)
 }
 
 /**
@@ -118,20 +127,16 @@ export function DANGEROUSLY_runPendingImmediatesAfterCurrentTask() {
  * so we have to be defensive.
  */
 export function expectNoPendingImmediates() {
-  if (executionState !== ExecutionState.None) {
-    const prevExecutionState = executionState
+  if (!isInstalled) {
+    throw new InvariantError('install() was not called')
+  }
 
-    // Reset the state as best we can to prevent further crashes.
-    // Otherwise, any subsequent call to `DANGEROUSLY_runPendingImmediatesAfterCurrentTask`
-    // would error, requiring a server restart to fix.
-    executionState = ExecutionState.None
-    queuedImmediates.length = 0
-    // don't reset `pendingNextTicks` -- if we still have pending ticks,
-    // they might decrement the counter below 0. This should reset organically
-    // as the ticks execute.
-
-    throw new InvariantError(
-      `Expected all captured immediates to have been executed (state: ${ExecutionState[prevExecutionState]})`
+  if (currentExecution !== null) {
+    bail(
+      currentExecution,
+      new InvariantError(
+        `Expected all captured immediates to have been executed (state: ${ExecutionState[currentExecution.state]})`
+      )
     )
   }
 }
@@ -140,10 +145,13 @@ export function expectNoPendingImmediates() {
  * Wait until all nextTicks and microtasks spawned from the current task are done,
  * then execute any immediates that they queued.
  * */
-function scheduleWorkAfterNextTicksAndMicrotasks() {
-  if (executionState !== ExecutionState.Waiting) {
-    throw new InvariantError(
-      `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[executionState]})`
+function scheduleWorkAfterNextTicksAndMicrotasks(execution: Execution) {
+  if (execution.state !== ExecutionState.Waiting) {
+    bail(
+      execution,
+      new InvariantError(
+        `scheduleWorkAfterTicksAndMicrotasks can only be called while waiting (state: ${ExecutionState[execution.state]})`
+      )
     )
   }
 
@@ -167,35 +175,72 @@ function scheduleWorkAfterNextTicksAndMicrotasks() {
     // (note that this call won't increment `pendingNextTicks`,
     // only the patched `process.nextTick` does that, so this won't loop infinitely)
     originalNextTick(() => {
+      if (
+        execution.state === ExecutionState.Abandoned ||
+        currentExecution !== execution
+      ) {
+        debug?.(`scheduler :: the execution was abandoned`)
+        return
+      }
       if (pendingNextTicks > 0) {
         // More nextTicks were scheduled while the microtask queue ran. Let those run first, then try again.
         debug?.(`scheduler :: yielding to ${pendingNextTicks} nextTicks`)
-        return scheduleWorkAfterNextTicksAndMicrotasks()
+        return scheduleWorkAfterNextTicksAndMicrotasks(execution)
       }
 
       // There's no other nextTicks, we're the last one, so we're at the end of the task.
       // Now, we can try and execute any queued immediates.
-      return performWork()
+      try {
+        return performWork(execution)
+      } catch (err) {
+        // If this error comes from a bail() call, rethrow it.
+
+        // typescript can't tell that the state might've been mutated
+        // and the narrowing from above is no longer valid
+        const executionAfterWork = execution as Execution
+        if (executionAfterWork.state === ExecutionState.Abandoned) {
+          throw err
+        }
+
+        // Otherwise, bail out here (which will trigger an uncaught exception)
+        // Note that we're using the same microtask trick as `safelyRunNextTickCallback`.
+        queueMicrotask(() => {
+          bail(
+            execution,
+            new InvariantError(
+              'An unexpected error occurred while executing immediates',
+              { cause: err }
+            )
+          )
+        })
+      }
     })
   })
 }
 
 /** Execute one immediate, and schedule a check for more (in case there's others in the queue) */
-function performWork() {
+function performWork(execution: Execution) {
+  if (execution.state === ExecutionState.Abandoned) {
+    return
+  }
+
   debug?.(`scheduler :: performing work`)
 
-  if (executionState !== ExecutionState.Waiting) {
-    throw new InvariantError(
-      `performWork can only be called while waiting (state: ${ExecutionState[executionState]})`
+  if (execution.state !== ExecutionState.Waiting) {
+    bail(
+      execution,
+      new InvariantError(
+        `performWork can only be called while waiting (state: ${ExecutionState[execution.state]})`
+      )
     )
   }
-  executionState = ExecutionState.Working
+  execution.state = ExecutionState.Working
 
-  const queueItem = takeNextActiveQueueItem()
+  const queueItem = takeNextActiveQueueItem(execution)
 
   if (queueItem === null) {
     debug?.(`scheduler :: no immediates queued, exiting`)
-    stopCapturingImmediates()
+    stopCapturingImmediates(execution)
     return
   }
 
@@ -239,19 +284,20 @@ function performWork() {
     thrownValue = err
   }
 
-  executionState = ExecutionState.Waiting
+  execution.state = ExecutionState.Waiting
 
   // schedule the loop again in case there's more immediates after this.
   // if this is the last immediate, this also ensures that [nextTicks and microtasks
   // spawned from the current immediate] are executed before we let the event loop
   // move on to the next task.
-  scheduleWorkAfterNextTicksAndMicrotasks()
+  scheduleWorkAfterNextTicksAndMicrotasks(execution)
 }
 
-function takeNextActiveQueueItem(): ActiveQueueItem | null {
+function takeNextActiveQueueItem(execution: Execution): ActiveQueueItem | null {
   // Find the first (if any) queued immediate that wasn't cleared.
   // We don't remove immediates from the array when they're cleared,
   // so this requires some legwork to exclude (and possibly drop) cleared items.
+  const { queuedImmediates } = execution
 
   let firstActiveItem: ActiveQueueItem | null = null
   let firstActiveItemIndex = -1
@@ -288,34 +334,98 @@ function takeNextActiveQueueItem(): ActiveQueueItem | null {
   return firstActiveItem
 }
 
-function startCapturingImmediates() {
-  if (!isInstalled) {
-    throw new InvariantError('install() was not called')
-  }
-
-  if (executionState !== ExecutionState.None) {
-    throw new InvariantError(
-      `Cannot start capturing immediates again without finishing the previous task (state: ${ExecutionState[executionState]})`
+function startCapturingImmediates(): Execution {
+  if (currentExecution !== null) {
+    bail(
+      currentExecution,
+      new InvariantError(
+        `Cannot start capturing immediates again without finishing the previous task (state: ${ExecutionState[currentExecution.state]})`
+      )
     )
   }
-  executionState = ExecutionState.Waiting
   wasEnabledAtLeastOnce = true
+
+  const execution: Execution = {
+    state: ExecutionState.Waiting,
+    queuedImmediates: [],
+  }
+  currentExecution = execution
+
+  return execution
 }
 
-function stopCapturingImmediates() {
-  if (!isInstalled) {
-    throw new InvariantError('install() was not called')
+function stopCapturingImmediates(execution: Execution) {
+  if (execution.state === ExecutionState.Abandoned) {
+    return
   }
 
   // This check enforces that we run performWork at least once before stopping
   // to make sure that we've waited for all the nextTicks and microtasks
   // that might've scheduled some immediates after sync code.
-  if (executionState !== ExecutionState.Working) {
-    throw new InvariantError(
-      `Cannot stop capturing immediates before execution is finished (state: ${ExecutionState[executionState]})`
+  if (execution.state !== ExecutionState.Working) {
+    bail(
+      execution,
+      new InvariantError(
+        `Cannot stop capturing immediates before execution is finished (state: ${ExecutionState[execution.state]})`
+      )
     )
   }
-  executionState = ExecutionState.None
+
+  execution.state = ExecutionState.Finished
+
+  if (currentExecution === execution) {
+    currentExecution = null
+  }
+}
+
+function bail(execution: Execution, error: Error): never {
+  // Reset the state as best we can to prevent further crashes.
+  // Otherwise, any subsequent call to `DANGEROUSLY_runPendingImmediatesAfterCurrentTask`
+  // would error, requiring a server restart to fix.
+
+  if (currentExecution === execution) {
+    currentExecution = null
+  }
+
+  execution.state = ExecutionState.Abandoned
+
+  // If we have any queued immediates, schedule them with native `setImmediate` and clear the queue.
+  // We don't want to skip running them altogether, because that could lead to
+  // e.g. hanging promises (for `new Promise((resolve) => setImmediate(resolve))`),
+  // but we're in an inconsistent state and can't run them as fast immediates,
+  // so this is the next best thing.
+  for (const queueItem of execution.queuedImmediates) {
+    if (queueItem.isCleared) {
+      continue
+    }
+    scheduleQueuedImmediateAsNativeImmediate(queueItem)
+  }
+  execution.queuedImmediates.length = 0
+
+  // Don't reset `pendingNextTicks` -- it will reset to 0 on its own as the nextTicks execute.
+  // If we set it to 0 here while we still have pending ticks, they'd decrement it below 0.
+
+  throw error
+}
+
+function scheduleQueuedImmediateAsNativeImmediate(queueItem: ActiveQueueItem) {
+  const { callback, args, immediateObject } = queueItem
+  const hasRef = immediateObject[INTERNALS].hasRef
+
+  clearQueueItem(queueItem)
+
+  const nativeImmediate =
+    args !== null
+      ? originalSetImmediate(callback, ...args)
+      : originalSetImmediate(callback)
+
+  if (!hasRef) {
+    nativeImmediate.unref()
+  }
+
+  // Make our fake immediate object proxy all relevant operations
+  // (clearing, ref(), unref(), hasRef()) to the actual native immediate.
+  proxyQueuedImmediateToNativeImmediate(immediateObject, nativeImmediate)
 }
 
 type QueueItem = ActiveQueueItem | ClearedQueueItem
@@ -347,7 +457,7 @@ function patchedNextTick<TArgs extends any[]>(
   ...args: TArgs
 ): void
 function patchedNextTick() {
-  if (executionState === ExecutionState.None) {
+  if (currentExecution === null) {
     return originalNextTick.apply(
       null,
       // @ts-expect-error: this is valid, but typescript doesn't get it
@@ -413,7 +523,7 @@ function patchedSetImmediate<TArgs extends any[]>(
 ): NodeJS.Immediate
 function patchedSetImmediate(callback: (args: void) => void): NodeJS.Immediate
 function patchedSetImmediate(): NodeJS.Immediate {
-  if (executionState === ExecutionState.None) {
+  if (currentExecution === null) {
     return originalSetImmediate.apply(
       null,
       // @ts-expect-error: this is valid, but typescript doesn't get it
@@ -443,7 +553,7 @@ function patchedSetImmediate(): NodeJS.Immediate {
     args,
     immediateObject,
   }
-  queuedImmediates.push(queueItem)
+  currentExecution.queuedImmediates.push(queueItem)
 
   immediateObject[INTERNALS].queueItem = queueItem
 
@@ -454,7 +564,7 @@ function patchedSetImmediatePromise<T = void>(
   value: T,
   options?: import('node:timers').TimerOptions
 ): Promise<T> {
-  if (executionState === ExecutionState.None) {
+  if (currentExecution === null) {
     const originalPromisify: (typeof setImmediate)['__promisify__'] =
       // @ts-expect-error: the types for `promisify.custom` are strange
       originalSetImmediate[promisify.custom]
@@ -513,10 +623,26 @@ const patchedClearImmediate = (
 
 const INTERNALS: unique symbol = Symbol.for('next.Immediate.internals')
 
-type NextImmediateInternals = {
-  /** Stored to reflect `ref()`/`unref()` calls, but has no effect otherwise */
-  hasRef: boolean
-  queueItem: ActiveQueueItem | null
+type NextImmediateInternals =
+  | {
+      /** Stored to reflect `ref()`/`unref()` calls, but has no effect otherwise */
+      hasRef: boolean
+      queueItem: ActiveQueueItem | null
+      nativeImmediate: null
+    }
+  | {
+      hasRef: null
+      queueItem: null
+      nativeImmediate: NodeJS.Immediate
+    }
+
+function proxyQueuedImmediateToNativeImmediate(
+  immediateObject: NextImmediate,
+  nativeImmediate: NodeJS.Immediate
+) {
+  immediateObject[INTERNALS].hasRef = null
+  immediateObject[INTERNALS].queueItem = null
+  immediateObject[INTERNALS].nativeImmediate = nativeImmediate
 }
 
 /** Makes sure that we're implementing all the public `Immediate` methods */
@@ -527,11 +653,14 @@ class NextImmediate implements NativeImmediate {
   [INTERNALS]: NextImmediateInternals = {
     queueItem: null,
     hasRef: true,
+    nativeImmediate: null,
   }
   hasRef() {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
       return internals.hasRef
+    } else if (internals.nativeImmediate) {
+      return internals.nativeImmediate.hasRef()
     } else {
       // if we're no longer queued (cleared or executed), hasRef is always false
       return false
@@ -541,6 +670,8 @@ class NextImmediate implements NativeImmediate {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
       internals.hasRef = true
+    } else if (internals.nativeImmediate) {
+      internals.nativeImmediate.ref()
     }
     return this
   }
@@ -548,6 +679,8 @@ class NextImmediate implements NativeImmediate {
     const internals = this[INTERNALS]
     if (internals.queueItem) {
       internals.hasRef = false
+    } else if (internals.nativeImmediate) {
+      internals.nativeImmediate.unref()
     }
     return this
   }
@@ -567,6 +700,8 @@ class NextImmediate implements NativeImmediate {
       const queueItem = internals.queueItem
       internals.queueItem = null
       clearQueueItem(queueItem)
+    } else if (internals.nativeImmediate) {
+      internals.nativeImmediate[Symbol.dispose]()
     }
   }
 }
