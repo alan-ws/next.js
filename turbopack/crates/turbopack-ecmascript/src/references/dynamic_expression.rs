@@ -10,13 +10,17 @@ use crate::{
     create_visitor,
 };
 
-#[derive(PartialEq, Eq, TraceRawVcs, Serialize, Deserialize, ValueDebugFormat, NonLocalValue)]
+#[derive(
+    PartialEq, Eq, TraceRawVcs, Serialize, Deserialize, ValueDebugFormat, NonLocalValue, Debug,
+)]
 enum DynamicExpressionType {
     Promise,
     Normal,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue)]
+#[derive(
+    PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue, Debug,
+)]
 pub struct DynamicExpression {
     path: AstPath,
     ty: DynamicExpressionType,

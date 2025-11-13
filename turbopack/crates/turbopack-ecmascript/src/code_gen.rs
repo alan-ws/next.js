@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use swc_core::{
     base::SwcComments,
+    common::Spanned,
     ecma::{
         ast::{
             BlockStmt, CallExpr, Expr, Lit, MemberExpr, ModuleDecl, ModuleItem, Pat, Program, Prop,
@@ -143,7 +144,7 @@ pub trait AstModifier: Send + Sync {
     method!(visit_mut_program, Program);
 }
 
-pub trait ModifiableAst {
+pub trait ModifiableAst: Spanned {
     fn modify(&mut self, modifier: &dyn AstModifier);
 }
 
@@ -172,7 +173,9 @@ impl_modify!(visit_mut_block_stmt, BlockStmt);
 impl_modify!(visit_mut_switch_case, SwitchCase);
 impl_modify!(visit_mut_program, Program);
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue)]
+#[derive(
+    PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue, Debug,
+)]
 pub enum CodeGen {
     // AMD occurs very rarely and makes the enum much bigger
     AmdDefineWithDependenciesCodeGen(Box<AmdDefineWithDependenciesCodeGen>),
@@ -194,7 +197,7 @@ pub enum CodeGen {
     RequireContextAssetReferenceCodeGen(RequireContextAssetReferenceCodeGen),
     UrlAssetReferenceCodeGen(UrlAssetReferenceCodeGen),
     WorkerAssetReferenceCodeGen(WorkerAssetReferenceCodeGen),
-    ReplaceBinaryExpressionWithFirstChild(ReplaceParentWithChild),
+    ReplaceParentWithChild(ReplaceParentWithChild),
 }
 
 impl CodeGen {
@@ -223,7 +226,7 @@ impl CodeGen {
             Self::RequireContextAssetReferenceCodeGen(v) => v.code_generation(ctx).await,
             Self::UrlAssetReferenceCodeGen(v) => v.code_generation(ctx).await,
             Self::WorkerAssetReferenceCodeGen(v) => v.code_generation(ctx).await,
-            Self::ReplaceBinaryExpressionWithFirstChild(v) => v.code_generation(),
+            Self::ReplaceParentWithChild(v) => v.code_generation(),
         }
     }
 }

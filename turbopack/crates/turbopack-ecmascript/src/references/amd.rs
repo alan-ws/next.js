@@ -127,7 +127,9 @@ pub enum AmdDefineFactoryType {
     Value,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue)]
+#[derive(
+    PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue, Debug,
+)]
 pub struct AmdDefineWithDependenciesCodeGen {
     dependencies_requests: Vec<AmdDefineDependencyElement>,
     origin: ResolvedVc<Box<dyn ResolveOrigin>>,

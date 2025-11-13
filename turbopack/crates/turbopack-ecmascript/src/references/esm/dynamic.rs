@@ -121,7 +121,9 @@ impl IntoCodeGenReference for EsmAsyncAssetReference {
     }
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue)]
+#[derive(
+    PartialEq, Eq, Serialize, Deserialize, TraceRawVcs, ValueDebugFormat, NonLocalValue, Debug,
+)]
 pub struct EsmAsyncAssetReferenceCodeGen {
     path: AstPath,
     reference: ResolvedVc<EsmAsyncAssetReference>,

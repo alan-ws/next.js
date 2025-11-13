@@ -35,7 +35,7 @@ use crate::{
     utils::{AstPathRange, unparen},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectsBlock {
     pub effects: Vec<Effect>,
     pub range: AstPathRange,
@@ -52,7 +52,7 @@ impl EffectsBlock {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionalKind {
     /// The blocks of an `if` statement without an `else` block.
     If { then: Box<EffectsBlock> },
@@ -127,7 +127,7 @@ impl ConditionalKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectArg {
     Value(JsValue),
     Closure(JsValue, Box<EffectsBlock>),
@@ -148,7 +148,7 @@ impl EffectArg {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Some condition which affects which effects might be executed. If the
     /// condition evaluates to some compile-time constant, we can use that
@@ -1125,6 +1125,12 @@ impl Analyzer<'_> {
     }
 
     fn add_effect(&mut self, effect: Effect) {
+        if matches!(effect, Effect::Conditional { .. }) {
+            debug_assert!(
+                !self.effects.contains(&effect),
+                "adding duplicate conditional effect: {effect:?}"
+            );
+        }
         self.effects.push(effect);
     }
 
